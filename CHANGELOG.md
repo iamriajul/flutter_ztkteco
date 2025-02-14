@@ -1,3 +1,7 @@
+## 1.0.3
+
+* Fix [getAttendanceLogs and getUsers method has issues retrieving data](https://github.com/rymesaint/flutter_ztkteco/issues/7)
+
 ## 1.0.2
 
 * Fix [FormatException: Invalid radix-10 number](https://github.com/rymesaint/flutter_ztkteco/issues/3)

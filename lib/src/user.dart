@@ -1,8 +1,5 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_zkteco/flutter_zkteco.dart';
-import 'package:flutter_zkteco/src/model/user_info.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
 class User {
@@ -18,31 +15,33 @@ class User {
   /// the user ID, name, role, password, and card number. If the user name is
   /// empty, the user ID is used instead.
   static Future<List<UserInfo>> get(ZKTeco self) async {
-    int command = Util.CMD_USER_TEMP_RRQ;
-    String commandString = String.fromCharCode(Util.FCT_USER);
+    try {
+      int command = Util.CMD_USER_TEMP_RRQ;
+      String commandString = String.fromCharCode(Util.FCT_USER);
 
-    dynamic session = await self.command(command, commandString,
-        type: Util.COMMAND_TYPE_DATA);
+      dynamic session = await self.command(command, commandString,
+          type: Util.COMMAND_TYPE_DATA);
 
-    if (session == false) {
-      return [];
-    }
+      if (session == false) {
+        return [];
+      }
+      Uint8List? userData = await Util.recData(self, first: true);
 
-    Uint8List? userData = await Util.recData(self, first: true);
+      if (userData == null || userData.length <= 11) {
+        debugPrint('⚠️ No user data received.');
+        return [];
+      }
 
-    List<UserInfo> users = [];
-
-    if (userData?.isNotEmpty == true) {
-      Uint8List user = userData!.sublist(11);
+      List<UserInfo> users = [];
+      Uint8List user = userData.sublist(11);
       int chunkSize = 72;
-      while (user.length > chunkSize) {
-        String u = Util.byteToHex(Uint8List.fromList(user.sublist(0, 72)));
+
+      while (user.length >= chunkSize) {
+        String u =
+            Util.byteToHex(Uint8List.fromList(user.sublist(0, chunkSize)));
         int? u1 = int.tryParse(u.substring(2, 4), radix: 16);
         int? u2 = int.tryParse(u.substring(4, 6), radix: 16);
-        int? uid;
-        if (u1 != null && u2 != null) {
-          uid = u1 + (u2 * 256);
-        }
+        int? uid = (u1 != null && u2 != null) ? u1 + (u2 * 256) : null;
 
         int? cardNo = int.tryParse(
           u.substring(78, 80) +
@@ -52,27 +51,20 @@ class User {
           radix: 16,
         );
 
-        int role = int.parse(u.substring(6, 8), radix: 16);
+        int role = int.tryParse(u.substring(6, 8), radix: 16) ?? 0;
 
-        Uint8List passwordBinary = Util.hex2bin(u.substring(8, 24));
+        String password = Util.extractString(u, 8, 24);
+        String name = Util.extractString(u, 24, 74);
+        String userId = Util.extractString(u, 98, 144);
 
-        Uint8List nameBinary = Util.hex2bin(u.substring(24, 74));
-
-        Uint8List userIdBinary = Util.hex2bin(u.substring(98, 144));
-
-        List<String> password =
-            utf8.decode(passwordBinary, allowMalformed: true).split('\x00');
-        List<String> name =
-            utf8.decode(nameBinary, allowMalformed: true).split('\x00');
-        List<String> userid =
-            utf8.decode(userIdBinary, allowMalformed: true).split('\x00');
+        name = name.isNotEmpty ? name : userId;
 
         final Map<String, dynamic> data = {
           'uid': uid,
-          'userid': userid[0],
-          'name': name[0].isEmpty ? userid[0] : name[0],
+          'userid': userId,
+          'name': name,
           'role': role,
-          'password': password[0],
+          'password': password,
           'cardno': cardNo,
         };
 
@@ -80,9 +72,13 @@ class User {
 
         user = user.sublist(chunkSize);
       }
+      debugPrint('✅ Successfully retrieved ${users.length} users.');
+      return users;
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error retrieving users: $e');
+      debugPrint(stackTrace.toString());
+      return [];
     }
-
-    return users;
   }
 
   /// Sets a user in the device.
@@ -126,18 +122,19 @@ class User {
     int cardNo = 0,
     int role = Util.LEVEL_USER,
   }) async {
-    if (uid == 0 ||
-        (uid > Util.USHRT_MAX) ||
-        (userid.length > 9) ||
-        (name.length > 24) ||
-        (password.length > 8) ||
-        (cardNo > 10)) {
+    // Validate input parameters
+    if (_isInvalidUserInput(uid, userid, name, password, cardNo)) {
+      debugPrint('❌ Invalid user input. Check constraints.');
       return false;
     }
 
     int command = Util.CMD_SET_USER;
-    String byte1 = String.fromCharCode((uid % 256));
-    String byte2 = String.fromCharCode((uid >> 8));
+
+    // Convert UID to bytes (low and high parts)
+    String byte1 = String.fromCharCode((uid % 0xff));
+    String byte2 = String.fromCharCode((uid >> 8) & 0xff);
+
+    // Convert card number to binary string
     String cardno = String.fromCharCodes(
         Util.hex2bin(Util.reverseHex(cardNo.toRadixString(16))));
 
@@ -153,7 +150,30 @@ class User {
         userid.padRight(9, '\x00') +
         ''.padRight(15, '\x00');
 
-    return await self.command(command, commandString);
+    try {
+      dynamic response = await self.command(command, commandString);
+      if (response == false) {
+        debugPrint('❌ Failed to set user.');
+        return false;
+      }
+
+      debugPrint('✅ User set successfully: $userid');
+      return response;
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error setting user: $e');
+      debugPrint(stackTrace.toString());
+      return false;
+    }
+  }
+
+  static bool _isInvalidUserInput(
+      int uid, String userid, String name, String password, int cardNo) {
+    return uid == 0 ||
+        uid > Util.USHRT_MAX ||
+        userid.length > 9 ||
+        name.length > 24 ||
+        password.length > 8 ||
+        cardNo > 10;
   }
 
   /// Clears a user from the device.
@@ -198,11 +218,31 @@ class User {
   /// The [uid] parameter is the user ID of the user to remove. The user ID must
   /// be between 1 and [Util.USHRT_MAX], inclusive.
   static Future<dynamic> remove(ZKTeco self, int uid) async {
-    int command = Util.CMD_DELETE_USER;
-    String byte1 = String.fromCharCode((uid % 256));
-    String byte2 = String.fromCharCode((uid >> 8));
-    String commandString = (byte1 + byte2);
+    if (uid <= 0 || uid > Util.USHRT_MAX) {
+      debugPrint('❌ Invalid UID: $uid');
+      return false;
+    }
 
-    return await self.command(command, commandString);
+    int command = Util.CMD_DELETE_USER;
+
+    // Convert UID to byte representation
+    String commandString = String.fromCharCode(uid & 0xFF) +
+        String.fromCharCode((uid >> 8) & 0xFF);
+
+    try {
+      dynamic response = await self.command(command, commandString);
+
+      if (response == false) {
+        debugPrint('❌ Failed to remove user: UID $uid');
+        return false;
+      }
+
+      debugPrint('✅ User removed successfully: UID $uid');
+      return true;
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error removing user: $e');
+      debugPrint(stackTrace.toString());
+      return false;
+    }
   }
 }

@@ -1,8 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_zkteco/flutter_zkteco.dart';
-import 'package:flutter_zkteco/src/model/attendance_log.dart';
-import 'package:flutter_zkteco/src/model/user_info.dart';
 
 void main() async {
   test('connect & disconnect from machine', () async {
@@ -16,6 +15,22 @@ void main() async {
 
     expect(isDisconnected, true);
   });
+
+  test('enable live attendance', () async {
+    final fingerMachine =
+        ZKTeco("10.7.0.53", timeout: const Duration(minutes: 1));
+    await fingerMachine.initSocket();
+    await fingerMachine.connect();
+
+    await fingerMachine.enableLiveCapture();
+    debugPrint('Live attendance enabled');
+
+    AttendanceLog matcher = const AttendanceLog();
+
+    fingerMachine.onAttendanceRecordReceived.listen(expectAsync1((event) {
+      expect(event, matcher);
+    }));
+  }, timeout: const Timeout(Duration(minutes: 1)));
 
   test('get version success', () async {
     final fingerMachine = ZKTeco("10.7.0.53");
@@ -133,6 +148,17 @@ void main() async {
     await fingerMachine.connect();
     dynamic platform = await fingerMachine.testVoice();
     expect(platform is String, true);
+    await fingerMachine.disconnect();
+  });
+
+  test('test restart', () async {
+    final fingerMachine = ZKTeco("10.7.0.53");
+    await fingerMachine.initSocket();
+
+    await fingerMachine.connect();
+
+    await fingerMachine.restart();
+
     await fingerMachine.disconnect();
   });
 }
