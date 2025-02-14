@@ -19,19 +19,27 @@ import 'package:flutter_zkteco/src/user.dart';
 import 'package:flutter_zkteco/src/util.dart';
 import 'package:flutter_zkteco/src/version.dart';
 
+export 'package:flutter_zkteco/src/model/user_info.dart';
+export 'package:flutter_zkteco/src/model/attendance_log.dart';
+
 class ZKTeco {
   String ip;
   int port;
   Duration timeout;
+  bool liveCapture = false;
+  int retry;
   late RawDatagramSocket zkClient;
-  late StreamController<Datagram> streamController;
+  StreamController<Datagram> streamController =
+      StreamController<Datagram>.broadcast();
 
   List<int> dataRecv = [];
   int sessionId = 0;
 
   // Constructor for ZKTeco
   ZKTeco(this.ip,
-      {this.port = 4370, this.timeout = const Duration(seconds: 10)});
+      {this.port = 4370,
+      this.timeout = const Duration(seconds: 10),
+      this.retry = 3});
 
   /// Initializes the socket connection to the device.
   ///
@@ -41,19 +49,26 @@ class ZKTeco {
   /// receive the datagrams. The method also sets a 60 second timeout on the
   /// socket, and prints a message to the console when the timeout is hit.
   Future<void> initSocket() async {
-    zkClient = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-    zkClient.timeout(timeout, onTimeout: (event) {
-      debugPrint('Socket timeout');
-    });
-    streamController = StreamController<Datagram>.broadcast();
-    zkClient.listen((RawSocketEvent event) {
-      if (event == RawSocketEvent.read) {
-        Datagram? datagram = zkClient.receive();
-        if (datagram != null) {
-          streamController.add(datagram);
+    try {
+      zkClient = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      debugPrint('✅ UDP Socket Initialized on Port ${zkClient.port}');
+
+      zkClient.listen((RawSocketEvent event) {
+        if (event == RawSocketEvent.read) {
+          Datagram? datagram = zkClient.receive();
+          if (datagram != null) {
+            debugPrint(
+                '📩 Received ${datagram.data.length} bytes from ${datagram.address}');
+            streamController.add(datagram);
+          }
         }
-      }
-    });
+      }, onError: (error) {
+        debugPrint('❌ Socket error: $error');
+        streamController.close();
+      });
+    } catch (e) {
+      debugPrint('❌ Error initializing socket: $e');
+    }
   }
 
   /// Sends a command to the device and waits for a response.
@@ -86,7 +101,8 @@ class ZKTeco {
     try {
       zkClient.send(buf, InternetAddress(ip), port);
 
-      await for (Datagram dataRecv in streamController.stream) {
+      await for (Datagram dataRecv
+          in streamController.stream.timeout(timeout)) {
         Datagram datagram = dataRecv;
         this.dataRecv = datagram.data;
 
@@ -481,4 +497,23 @@ class ZKTeco {
   /// the device could clear all attendance records, or a [String] containing an
   /// error message if the device could not be queried.
   Future<dynamic> clearAttendance() => Attendance.clear(this);
+
+  /// Enables live capture of attendance records from the device.
+  ///
+  /// When enabled, the device will send attendance records in real-time to the
+  /// Flutter application. The records are received by the
+  /// [onAttendanceRecordReceived] callback.
+  Future<void> enableLiveCapture() => Attendance.enableLiveCapture(this);
+
+  /// Disables live capture of attendance records from the device.
+  ///
+  /// When disabled, the device will no longer send attendance records in
+  /// real-time to the Flutter application. The device must be connected and
+  /// authenticated before this method can be used.
+  Future<void> cancelLiveCapture() => Attendance.cancelLiveCapture(this);
+
+  Future<dynamic> verifyAuthentication() => Connect.verifyAuth(this);
+
+  Stream<AttendanceLog?> get onAttendanceRecordReceived =>
+      Attendance.streamLiveCapture(this);
 }

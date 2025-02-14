@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -48,6 +49,22 @@ class Util {
   static const int CMD_DELETE_USER = 18;
   static const int CMD_DELETE_USER_TEMP = 19;
   static const int CMD_CLEAR_ADMIN = 20;
+
+  // Reference https://github.com/fananimi/pyzk/blob/master/zk/const.py#L91
+  static const int CMD_REG_EVENT = 500;
+
+  static const int CMD_STARTVERIFY = 60;
+  static const int CMD_CANCELCAPTURE = 62;
+
+  static const int EF_ATTLOG = 1;
+  static const int EF_FINGER = (1 << 1);
+  static const int EF_ENROLLUSER = (1 << 2);
+  static const int EF_ENROLLFINGER = (1 << 3);
+  static const int EF_BUTTON = (1 << 4);
+  static const int EF_UNLOCK = (1 << 5);
+  static const int EF_VERIFY = (1 << 7);
+  static const int EF_FPFTR = (1 << 8);
+  static const int EF_ALARM = (1 << 9);
 
   static const int LEVEL_USER = 0;
   static const int LEVEL_ADMIN = 14;
@@ -185,15 +202,7 @@ class Util {
     }
 
     // Extract the first 8 bytes and convert to hex
-    String h1 = self.dataRecv[0].toRadixString(16).padLeft(2, '0');
-    String h2 = self.dataRecv[1].toRadixString(16).padLeft(2, '0');
-    // String h3 = self.dataRecv[2].toRadixString(16).padLeft(2, '0');
-    // String h4 = self.dataRecv[3].toRadixString(16).padLeft(2, '0');
-    // String h5 = self.dataRecv[4].toRadixString(16).padLeft(2, '0');
-    // String h6 = self.dataRecv[5].toRadixString(16).padLeft(2, '0');
-    // String h7 = self.dataRecv[6].toRadixString(16).padLeft(2, '0');
-    // String h8 = self.dataRecv[7].toRadixString(16).padLeft(2, '0');
-    int command = int.parse(h2 + h1, radix: 16);
+    int command = (self.dataRecv[1] << 8) | self.dataRecv[0];
 
     // Unpack the first 8 bytes
     // ByteData byteData =
@@ -205,16 +214,11 @@ class Util {
       if (self.dataRecv.length < 12) return null;
 
       // Extract the next 4 bytes
-      String h9 = self.dataRecv[8].toRadixString(16).padLeft(2, '0');
-      String h10 = self.dataRecv[9].toRadixString(16).padLeft(2, '0');
-      String h11 = self.dataRecv[10].toRadixString(16).padLeft(2, '0');
-      String h12 = self.dataRecv[11].toRadixString(16).padLeft(2, '0');
+      int size = (self.dataRecv[11] << 24) |
+          (self.dataRecv[10] << 16) |
+          (self.dataRecv[9] << 8) |
+          self.dataRecv[8];
 
-      // ByteData sizeData = ByteData.sublistView(
-      //     Uint8List.fromList(self.dataRecv.sublist(8, 12)));
-      // int size = sizeData.getUint32(0, Endian.little);
-
-      int size = int.parse(h12 + h11 + h10 + h9, radix: 16);
       return size;
     } else {
       return null;
@@ -459,13 +463,49 @@ class Util {
   /// waits for the device to send data. The default value of [first] is
   /// [true].
   static Future<Uint8List?> recData(ZKTeco self, {bool first = true}) async {
-    int? bytes = getSize(self);
+    int attempt = 0;
+    int delayMs = 500; // 0.5 seconds delay
+    List<Uint8List> packetBuffer = [];
 
-    if (bytes == null || bytes <= 0) {
+    while (attempt < self.retry) {
+      attempt++;
+      debugPrint('Attempt $attempt to receive data...');
+      int? bytes = getSize(self);
+
+      if (bytes == null || bytes <= 0) {
+        debugPrint('Failed to get data size. Retrying in ${delayMs}ms...');
+        await Future.delayed(Duration(milliseconds: delayMs));
+        delayMs *= 2; // Double delay each retry (exponential backoff)
+        continue;
+      }
+
+      try {
+        Uint8List data = await _parseData(self, bytes, first);
+        if (data.isNotEmpty) {
+          packetBuffer.add(data);
+          debugPrint(
+              'Received packet ${packetBuffer.length}, size: ${data.length}');
+        }
+      } catch (e) {
+        debugPrint('Error receiving data: $e. Retrying in ${delayMs}ms...');
+      }
+
+      await Future.delayed(Duration(milliseconds: delayMs));
+      delayMs *= 2; // Increase delay before next retry
+    }
+
+    if (packetBuffer.isEmpty) {
+      debugPrint(
+          '❌ Failed to receive valid data after ${self.retry} attempts.');
       return null;
     }
 
-    return await _parseData(self, bytes, first);
+    Uint8List fullData =
+        Uint8List.fromList(packetBuffer.expand((x) => x).toList());
+
+    debugPrint(
+        '✅ Successfully reconstructed ${fullData.length} bytes of data.');
+    return fullData;
   }
 
   /// Parses the received data from the device.
@@ -487,7 +527,8 @@ class Util {
     BytesBuilder data = BytesBuilder();
     int received = 0;
 
-    await for (Datagram datagram in self.streamController.stream) {
+    await for (Datagram datagram
+        in self.streamController.stream.timeout(self.timeout)) {
       Uint8List dataRec = datagram.data;
 
       if (!first) {
@@ -499,7 +540,7 @@ class Util {
       received += dataRec.length;
       first = false;
 
-      debugPrint('Received: $received / $bytes');
+      Util.logReceived(received, bytes);
       if (received >= bytes) break;
     }
     return data.takeBytes();
@@ -512,7 +553,7 @@ class Util {
   /// and the total number of bytes expected as parameters. The method
   /// prints a message to the console in the format "Received $received bytes
   /// out of $total bytes".
-  static void logReceived(ZKTeco self, int received, int total) {
+  static void logReceived(int received, int total) {
     debugPrint('Received $received bytes out of $total bytes');
   }
 
@@ -547,5 +588,13 @@ class Util {
   /// `"01020304"`.
   static String byteToHex(Uint8List bytes) {
     return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  static String extractString(String hexString, int start, int end) {
+    Uint8List binaryData = Util.hex2bin(hexString.substring(start, end));
+    return utf8
+        .decode(binaryData, allowMalformed: true)
+        .split('\x00')[0]
+        .trim();
   }
 }

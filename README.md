@@ -48,10 +48,13 @@ import 'package:flutter_zkteco/flutter_zkteco.dart';
 
 ```dart
 // Create an instance of the ZKTeco class
-ZKTeco fingerprintMachine = ZKTeco('192.168.1.201', port: 4370, timeout: Duration(seconds: 10));
+ZKTeco? fingerprintMachine = ZKTeco('192.168.1.201', port: 4370, timeout: Duration(seconds: 10));
+
+// Initialize socket
+await fingerprintMachine?.initSocket();
 
 // Initialize the connection
-bool isConnected = await fingerprintMachine.connect();
+bool isConnected = await fingerprintMachine?.connect();
 if (isConnected) {
   print('Connection established!');
 } else {
@@ -63,7 +66,7 @@ if (isConnected) {
 
 ```dart
 // Fetch attendance logs from the machine
-List<AttendanceLog> logs = await fingerprintMachine.getAttendanceLogs();
+List<AttendanceLog> logs = await fingerprintMachine?.getAttendanceLogs();
 for (var log in logs) {
   print('User ID: ${log.id}, Timestamp: ${log.timestamp}');
 }
@@ -73,7 +76,7 @@ for (var log in logs) {
 
 ```dart
 // Retrieve user information from the fingerprint machine
-List<UserInfo> users = await fingerprintMachine.getUsers();
+List<UserInfo> users = await fingerprintMachine?.getUsers();
 for (var user in users) {
   print('User ID: ${user.userId}, Name: ${user.name}');
 }
@@ -82,7 +85,7 @@ for (var user in users) {
 #### Disconnect from the machine:
 
 ```dart
-await fingerprintMachine.disconnect();
+await fingerprintMachine?.disconnect();
 print('Disconnected from the fingerprint machine.');
 ```
 

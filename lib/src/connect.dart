@@ -17,46 +17,65 @@ class Connect {
   /// This function must be called before any other functions in this class can
   /// be used.
   static Future<bool> connect(ZKTeco self) async {
-    int command = Util.CMD_CONNECT;
-    String commandString = '';
-    int chksum = 0;
-    int sessionId = 0;
-    int replyId = -1 + Util.USHRT_MAX;
+    int attempt = 0;
+    int delayMs = 500; // Start with 500ms delay
 
-    List<int> buf =
-        Util.createHeader(command, chksum, sessionId, replyId, commandString);
-    try {
-      // Send data to the socket
-      self.zkClient.send(
-        buf,
-        InternetAddress(self.ip, type: InternetAddressType.IPv4),
-        self.port,
-      );
+    while (attempt < self.retry) {
+      attempt++;
+      debugPrint('Attempt $attempt to connect...');
+      int command = Util.CMD_CONNECT;
+      String commandString = '';
+      int chksum = 0;
+      int sessionId = 0;
+      int replyId = -1 + Util.USHRT_MAX;
 
-      await for (Datagram? dataRecv in self.streamController.stream) {
-        // Access the byte payload from the Datagram object
-        self.dataRecv = dataRecv!.data; // Assuming 'data' holds the byte list
+      List<int> buf =
+          Util.createHeader(command, chksum, sessionId, replyId, commandString);
+      try {
+        // Send data to the socket
+        self.zkClient.send(
+          buf,
+          InternetAddress(self.ip, type: InternetAddressType.IPv4),
+          self.port,
+        );
 
-        // Unpack data
-        List<int> unpacked = self.dataRecv.sublist(0, 8);
+        await for (Datagram? dataRecv
+            in self.streamController.stream.timeout(self.timeout)) {
+          // Access the byte payload from the Datagram object
+          if (dataRecv == null || dataRecv.data.length < 8) {
+            debugPrint(
+                '[Attempt $attempt] Received invalid response. Retrying...');
+            break;
+          }
+          self.dataRecv = dataRecv.data; // Assuming 'data' holds the byte list
 
-        // Extract sessionId from the unpacked data (bytes 5 and 6)
-        String h5 = unpacked[4].toRadixString(16).padLeft(2, '0');
-        String h6 = unpacked[5].toRadixString(16).padLeft(2, '0');
-        int session = int.parse(h6 + h5, radix: 16);
+          int session =
+              (self.dataRecv[5] << 8) | self.dataRecv[4]; // Little-endian
 
-        if (session == 0) {
-          return false;
-        } else {
-          self.sessionId = session;
-          return Util.checkValid(self.dataRecv);
+          if (session == 0) {
+            debugPrint('Session ID is 0, connection failed.');
+            break;
+          } else {
+            self.sessionId = session;
+            if (Util.checkValid(self.dataRecv)) {
+              debugPrint('Successfully connected on attempt $attempt.');
+              return true;
+            } else {
+              debugPrint('Invalid response, retrying...');
+            }
+          }
         }
+        return false;
+      } catch (e) {
+        debugPrint('Connection error: $e. Retrying in ${delayMs}ms...');
       }
-      return false;
-    } catch (e) {
-      debugPrint('Error: $e');
-      return false;
+
+      await Future.delayed(Duration(milliseconds: delayMs));
+      delayMs *= 2; // Exponential backoff
     }
+
+    debugPrint('Failed to connect after ${self.retry} attempts.');
+    return false;
   }
 
   /// Disconnect from ZKTeco device
@@ -73,16 +92,19 @@ class Connect {
   /// returns true if the device responds with a valid acknowledgement, and false
   /// if the device does not respond or the acknowledgement is invalid.
   static Future<bool> disconnect(ZKTeco self) async {
-    int command = Util.CMD_EXIT;
-    String commandString = '';
-    int chksum = 0;
-    int sessionId = self.sessionId;
+    int attempt = 0;
+    int delayMs = 500; // Initial delay
 
     // Ensure dataRecv has enough data before slicing
     if (self.dataRecv.length < 8) {
       debugPrint('Error: dataRecv has insufficient data.');
       return false;
     }
+
+    int command = Util.CMD_EXIT;
+    String commandString = '';
+    int chksum = 0;
+    int sessionId = self.sessionId;
 
     // Unpack the first 8 bytes
     List<int> unpacked = self.dataRecv.sublist(0, 8);
@@ -93,27 +115,57 @@ class Connect {
     List<int> buf =
         Util.createHeader(command, chksum, sessionId, replyId, commandString);
 
-    try {
-      // Send data to the socket
-      self.zkClient.send(
-        buf,
-        InternetAddress(self.ip),
-        self.port,
-      );
+    while (attempt < self.retry) {
+      attempt++;
+      debugPrint(
+          '[Attempt $attempt] Disconnecting from ${self.ip}:${self.port}');
 
-      await for (Datagram? dataRecv in self.streamController.stream) {
-        if (dataRecv == null) {
-          return false;
-        } else {
+      try {
+        // Send data to the socket
+        self.zkClient.send(
+          buf,
+          InternetAddress(self.ip),
+          self.port,
+        );
+
+        await for (Datagram? dataRecv
+            in self.streamController.stream.timeout(self.timeout)) {
+          if (dataRecv == null || dataRecv.data.isEmpty) {
+            debugPrint('[Attempt $attempt] No response received. Retrying...');
+            break;
+          }
           self.dataRecv = dataRecv.data;
           self.sessionId = 0;
-          return Util.checkValid(self.dataRecv);
+
+          if (Util.checkValid(self.dataRecv)) {
+            debugPrint('[Attempt $attempt] Successfully disconnected.');
+            self.zkClient.close();
+            self.streamController.close();
+            return true;
+          } else {
+            debugPrint('[Attempt $attempt] Invalid response. Retrying...');
+          }
         }
+      } catch (e) {
+        debugPrint('[Attempt $attempt] Disconnect error: $e');
       }
-      return false;
-    } catch (e) {
-      debugPrint('Error: $e');
-      return false;
+
+      await Future.delayed(Duration(milliseconds: delayMs));
+      delayMs *= 2; // Exponential backoff
+    }
+
+    debugPrint('❌ Failed to disconnect after ${self.retry} attempts.');
+    return false;
+  }
+
+  static verifyAuth(ZKTeco self) async {
+    int command = Util.CMD_STARTVERIFY;
+    String commandString = '';
+
+    var session = await self.command(command, commandString,
+        type: Util.COMMAND_TYPE_DATA);
+    if (session == false) {
+      return [];
     }
   }
 }
