@@ -98,10 +98,10 @@ print('Disconnected from the fingerprint machine.');
 
 ### `ZKTeco`
 
-- `ZKTeco(String ipAddress,{int port = 4370, Duration? timeout})`
+- `ZKTeco(String ipAddress,{int port = 4370, Duration? timeout, int retry = 3, bool tcp = true, bool debug = false, int? password})`
   - Creates an instance of the fingerprint machine with the specified IP address and port.
 
-- `Future<bool> connect()`
+- `Future<bool> connect({bool? ommitPing})`
   - Establishes a connection to the fingerprint machine.
 
 - `Future<List<AttendanceLog>> getAttendanceLogs()`
