@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_zkteco/flutter_zkteco.dart';
 
@@ -56,14 +58,20 @@ class _MyHomePageState extends State<MyHomePage> {
   List<UserInfo> users = [];
   List<AttendanceLog> attendances = [];
   bool loadingContent = false;
+  bool useTcp = true;
+  int totalTab = 8;
+  String message = '';
 
   void _connectFp() async {
     try {
       setState(() {
         btnMessage = 'Connecting...';
       });
-      fingerprintMachine = ZKTeco(ipAdress.text, port: int.parse(port.text));
-      await fingerprintMachine?.initSocket();
+      fingerprintMachine = ZKTeco(ipAdress.text,
+          port: int.parse(port.text),
+          debug: true,
+          tcp: useTcp,
+          timeout: Duration(seconds: 20));
       final connect = await fingerprintMachine?.connect();
       if (connect == true) {
         setState(() {
@@ -113,6 +121,85 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  void getOS() async {
+    setState(() {
+      loadingContent = true;
+    });
+
+    String? os = await fingerprintMachine?.getOS();
+
+    setState(() {
+      message = os ?? '';
+      loadingContent = false;
+    });
+  }
+
+  void getPlatform() async {
+    setState(() {
+      loadingContent = true;
+    });
+
+    String? platform = await fingerprintMachine?.platform();
+    String? platformVersion = await fingerprintMachine?.platformVersion();
+
+    setState(() {
+      message = '${platform ?? ''} (${platformVersion ?? ''})';
+      loadingContent = false;
+    });
+  }
+
+  void getTime() async {
+    setState(() {
+      loadingContent = true;
+    });
+
+    String? time = await fingerprintMachine?.getTime();
+
+    setState(() {
+      message = time ?? '';
+      loadingContent = false;
+    });
+  }
+
+  void getSerialNumber() async {
+    setState(() {
+      loadingContent = true;
+    });
+
+    String? serial = await fingerprintMachine?.serialNumber();
+
+    setState(() {
+      message = serial ?? '';
+      loadingContent = false;
+    });
+  }
+
+  void getVersion() async {
+    setState(() {
+      loadingContent = true;
+    });
+
+    String? version = await fingerprintMachine?.version();
+
+    setState(() {
+      message = version ?? '';
+      loadingContent = false;
+    });
+  }
+
+  void getWorkcode() async {
+    setState(() {
+      loadingContent = true;
+    });
+
+    String? workcode = await fingerprintMachine?.getWorkcode();
+
+    setState(() {
+      message = workcode ?? '';
+      loadingContent = false;
+    });
+  }
+
   void _disconnectFp() async {
     await fingerprintMachine?.disconnect();
     setState(() {
@@ -121,16 +208,106 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  Widget _buildResponsiveForm() {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      return Column(
+        spacing: 10,
+        children: [
+          Row(
+            spacing: 20,
+            children: [
+              Expanded(
+                flex: 2,
+                child: TextFormField(
+                  controller: ipAdress,
+                  enabled: isConnected ? false : true,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: 'IP Address',
+                  ),
+                ),
+              ),
+              Expanded(
+                child: TextFormField(
+                  controller: port,
+                  enabled: isConnected ? false : true,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: 'Port',
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: isConnected ? _disconnectFp : _connectFp,
+                child: Text(btnMessage),
+              ),
+            ],
+          ),
+          CheckboxListTile(
+            value: useTcp,
+            title: Text('Uncheck to use UDP'),
+            onChanged: isConnected
+                ? null
+                : (value) => setState(
+                      () {
+                        useTcp = value ?? false;
+                      },
+                    ),
+          ),
+        ],
+      );
+    } else if (Platform.isAndroid || Platform.isIOS) {
+      return Column(
+        spacing: 10,
+        children: [
+          TextFormField(
+            controller: ipAdress,
+            enabled: isConnected ? false : true,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'IP Address',
+            ),
+          ),
+          TextFormField(
+            controller: port,
+            enabled: isConnected ? false : true,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Port',
+            ),
+          ),
+          CheckboxListTile(
+            value: useTcp,
+            title: Text('Uncheck to use UDP'),
+            onChanged: isConnected
+                ? null
+                : (value) => setState(
+                      () {
+                        useTcp = value ?? false;
+                      },
+                    ),
+          ),
+          TextButton(
+            onPressed: isConnected ? _disconnectFp : _connectFp,
+            child: Text(btnMessage),
+          ),
+        ],
+      );
+    }
+    return SizedBox.shrink();
+  }
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: totalTab,
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: Theme.of(context).colorScheme.inversePrimary,
           title: Text(widget.title),
           bottom: PreferredSize(
-            preferredSize: Size.fromHeight(140),
+            preferredSize: Size.fromHeight(
+                Platform.isAndroid || Platform.isIOS ? 350 : 220),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: SizedBox(
@@ -139,37 +316,10 @@ class _MyHomePageState extends State<MyHomePage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   spacing: 20,
                   children: <Widget>[
-                    Row(
-                      spacing: 20,
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: TextFormField(
-                            controller: ipAdress,
-                            enabled: isConnected ? false : true,
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              labelText: 'IP Address',
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: TextFormField(
-                            controller: port,
-                            enabled: isConnected ? false : true,
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              labelText: 'Port',
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: isConnected ? _disconnectFp : _connectFp,
-                          child: Text(btnMessage),
-                        ),
-                      ],
-                    ),
+                    _buildResponsiveForm(),
                     TabBar(
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
                       onTap: (value) {
                         if (isConnected == false) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -180,13 +330,45 @@ class _MyHomePageState extends State<MyHomePage> {
                           return;
                         }
                         if (value == 0) {
-                          getUserData();
+                          getOS();
                         } else if (value == 1) {
+                          getPlatform();
+                        } else if (value == 2) {
+                          getTime();
+                        }
+                        if (value == 3) {
+                          getSerialNumber();
+                        } else if (value == 4) {
+                          getVersion();
+                        }
+                        if (value == 5) {
+                          getWorkcode();
+                        } else if (value == 6) {
+                          getUserData();
+                        } else if (value == 7) {
                           getAttendancesData();
                         }
                         currentIndex = value;
                       },
                       tabs: [
+                        Tab(
+                          text: 'Get OS',
+                        ),
+                        Tab(
+                          text: 'Get Platform',
+                        ),
+                        Tab(
+                          text: 'Get Time',
+                        ),
+                        Tab(
+                          text: 'Get Serial Number',
+                        ),
+                        Tab(
+                          text: 'Get Version',
+                        ),
+                        Tab(
+                          text: 'Get Workcode',
+                        ),
                         Tab(
                           text: 'Get Users Data',
                         ),
@@ -203,6 +385,24 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
         body: TabBarView(
           children: [
+            loadingContent
+                ? const Center(child: CircularProgressIndicator())
+                : Center(child: Text(message)),
+            loadingContent
+                ? const Center(child: CircularProgressIndicator())
+                : Center(child: Text(message)),
+            loadingContent
+                ? const Center(child: CircularProgressIndicator())
+                : Center(child: Text(message)),
+            loadingContent
+                ? const Center(child: CircularProgressIndicator())
+                : Center(child: Text(message)),
+            loadingContent
+                ? const Center(child: CircularProgressIndicator())
+                : Center(child: Text(message)),
+            loadingContent
+                ? const Center(child: CircularProgressIndicator())
+                : Center(child: Text(message)),
             loadingContent
                 ? const Center(child: CircularProgressIndicator())
                 : ListView.builder(

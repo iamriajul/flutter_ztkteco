@@ -8,7 +8,7 @@ class Time {
   /// The method returns a [Future] that completes with a [bool] indicating if
   /// the device's time was successfully set, or a [String] containing an error
   /// message if the device could not be queried.
-  static dynamic set(ZKTeco self, DateTime $date) async {
+  static Future<String?> set(ZKTeco self, DateTime $date) async {
     int command = Util.CMD_SET_TIME;
     try {
       int encodedTime = Util.encodeTime($date);
@@ -18,18 +18,20 @@ class Time {
         ..buffer.asByteData().setUint32(0, encodedTime, Endian.little);
 
       // Send command and wait for reply
-      dynamic reply =
+      var resp =
           await self.command(command, String.fromCharCodes(commandBytes));
 
-      if (reply is bool) {
-        return reply;
+      if (resp['status'] == false) {
+        return null;
       }
 
-      return String.fromCharCodes(reply);
+      return String.fromCharCodes(self.dataRecv);
     } catch (e, stackTrace) {
-      debugPrint('❌ Error setting time: $e');
-      debugPrint(stackTrace.toString());
-      return false;
+      if (self.debug) {
+        debugPrint('❌ Error setting time: $e');
+        debugPrint(stackTrace.toString());
+      }
+      return null;
     }
   }
 
@@ -43,30 +45,30 @@ class Time {
   /// The method returns a [Future] that completes with a [String] containing
   /// the current time of the device, or a [bool] indicating if the device
   /// could not be queried.
-  static dynamic get(ZKTeco self) async {
+  static Future<String?> get(ZKTeco self) async {
     int command = Util.CMD_GET_TIME;
     try {
-      dynamic reply = await self.command(command, '');
-
-      if (reply is bool) {
-        return reply; // Return early if the command failed
-      }
+      await self.command(command, '');
 
       // Convert binary response to time
-      Uint8List reverseHexBytes =
-          Util.hex2bin(Util.reverseHex(Util.bin2hex(reply)));
+      Uint8List reverseHexBytes = Util.hex2bin(
+          Util.reverseHex(Util.bin2hex(Uint8List.fromList(self.dataRecv))));
 
       if (reverseHexBytes.length < 4) {
-        debugPrint('❌ Invalid time data received');
-        return false;
+        if (self.debug) {
+          debugPrint('❌ Invalid time data received');
+        }
+        return null;
       }
 
       int time = reverseHexBytes.buffer.asByteData().getUint32(0, Endian.big);
       return Util.decodeTime(time);
     } catch (e, stackTrace) {
-      debugPrint('❌ Error getting time: $e');
-      debugPrint(stackTrace.toString());
-      return false;
+      if (self.debug) {
+        debugPrint('❌ Error getting time: $e');
+        debugPrint(stackTrace.toString());
+      }
+      return null;
     }
   }
 }

@@ -1,3 +1,13 @@
+## 1.1.0
+
+* Added TCP protocol as default for optimizing connection to machine
+
+* Fix bug looping until waiting timeout for getting data from machine
+
+* Added more sample tab button to example
+
+* Removing initializing socket just use method connect()
+
 ## 1.0.3
 
 * Fix [getAttendanceLogs and getUsers method has issues retrieving data](https://github.com/rymesaint/flutter_ztkteco/issues/7)

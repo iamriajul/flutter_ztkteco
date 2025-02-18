@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_zkteco/src/attendance.dart';
 import 'package:flutter_zkteco/src/connect.dart';
 import 'package:flutter_zkteco/src/device.dart';
+import 'package:flutter_zkteco/src/error/zk_error_connection.dart';
 import 'package:flutter_zkteco/src/fingerprint.dart';
 import 'package:flutter_zkteco/src/model/attendance_log.dart';
 import 'package:flutter_zkteco/src/model/user_info.dart';
@@ -18,58 +19,67 @@ import 'package:flutter_zkteco/src/time.dart';
 import 'package:flutter_zkteco/src/user.dart';
 import 'package:flutter_zkteco/src/util.dart';
 import 'package:flutter_zkteco/src/version.dart';
+import 'package:flutter_zkteco/src/workcode.dart';
 
 export 'package:flutter_zkteco/src/model/user_info.dart';
 export 'package:flutter_zkteco/src/model/attendance_log.dart';
 
 class ZKTeco {
+  // The IP address of the device
   String ip;
-  int port;
-  Duration timeout;
-  bool liveCapture = false;
-  int retry;
-  late RawDatagramSocket zkClient;
-  StreamController<Datagram> streamController =
-      StreamController<Datagram>.broadcast();
 
-  List<int> dataRecv = [];
+  // The port number of the device
+  int port;
+
+  // The timeout for the connection
+  Duration timeout;
+
+  // The live capture
+  bool liveCapture = false;
+
+  // The socket used to connect to the device
+  int retry;
+
+  // Protocol used to connect to the device
+  bool tcp;
+
+  // The debug mode
+  bool debug;
+
+  // The socket used to connect to the device using TCP
+  Socket? zkSocket;
+
+  int userPacketSize = 28;
+
+  // The socket used to connect to the device using UDP
+  RawDatagramSocket? zkClient;
+
+  // The stream controller used to receive the datagrams
+  Completer<Datagram?> completer = Completer();
+  StreamController streamController = StreamController.broadcast();
+
+  // The data received from the device
+  List<int> dataRecv = List.empty(growable: true);
+
+  // The session ID
   int sessionId = 0;
+
+  int replyId = -1 + Util.USHRT_MAX;
+
+  ByteData header = ByteData(0);
+
+  bool isConnect = false;
+
+  int? password;
 
   // Constructor for ZKTeco
   ZKTeco(this.ip,
       {this.port = 4370,
       this.timeout = const Duration(seconds: 10),
-      this.retry = 3});
-
-  /// Initializes the socket connection to the device.
-  ///
-  /// This method binds to any available IPv4 address on port 0, and then
-  /// listens for incoming datagrams on that socket. When a datagram is received,
-  /// it is added to the stream controller, which can be listened to in order to
-  /// receive the datagrams. The method also sets a 60 second timeout on the
-  /// socket, and prints a message to the console when the timeout is hit.
-  Future<void> initSocket() async {
-    try {
-      zkClient = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      debugPrint('✅ UDP Socket Initialized on Port ${zkClient.port}');
-
-      zkClient.listen((RawSocketEvent event) {
-        if (event == RawSocketEvent.read) {
-          Datagram? datagram = zkClient.receive();
-          if (datagram != null) {
-            debugPrint(
-                '📩 Received ${datagram.data.length} bytes from ${datagram.address}');
-            streamController.add(datagram);
-          }
-        }
-      }, onError: (error) {
-        debugPrint('❌ Socket error: $error');
-        streamController.close();
-      });
-    } catch (e) {
-      debugPrint('❌ Error initializing socket: $e');
-    }
-  }
+      this.retry = 3,
+      this.tcp = true,
+      this.debug = false,
+      this.password});
 
   /// Sends a command to the device and waits for a response.
   ///
@@ -83,49 +93,80 @@ class ZKTeco {
   /// The method returns a [Future] that completes with the response from the
   /// device, or [false] if an error occurred.
   Future<dynamic> command(int command, String commandString,
-      {String type = Util.COMMAND_TYPE_GENERAL}) async {
-    int chksum = 0;
+      {String type = Util.COMMAND_TYPE_GENERAL, int reponseSize = 8}) async {
+    if (![Util.CMD_CONNECT, Util.CMD_AUTH].contains(command) && !isConnect) {
+      throw ZKErrorConnection("Instance is not connected.");
+    }
+
     int sessionId = this.sessionId;
 
-    // Ensure dataRecv has enough data before processing
-    if (dataRecv.length < 8) {
-      throw Exception('dataRecv does not contain enough data.');
-    }
-
-    // Unpack the first 8 bytes
-    int replyId = getReplyId();
+    int replyId = !isConnect ? this.replyId : getReplyId();
 
     List<int> buf =
-        Util.createHeader(command, chksum, sessionId, replyId, commandString);
+        Util.createHeader(command, sessionId, replyId, commandString);
 
     try {
-      zkClient.send(buf, InternetAddress(ip), port);
+      if (tcp == true) {
+        List<int> top = Util.createTcpTop(buf);
+        zkSocket?.add(top);
 
-      await for (Datagram dataRecv
-          in streamController.stream.timeout(timeout)) {
-        Datagram datagram = dataRecv;
-        this.dataRecv = datagram.data;
+        await zkSocket?.flush();
 
-        // Unpack the received data
-        ByteData recvData = ByteData.sublistView(
-            Uint8List.fromList(this.dataRecv.sublist(0, 8)));
-        int session = recvData.getUint16(4, Endian.little);
+        List<int>? tcpDataRecv;
 
-        dynamic ret = false;
-
-        if (type == Util.COMMAND_TYPE_GENERAL && sessionId == session) {
-          ret = this.dataRecv.sublist(8);
-        } else if (type == Util.COMMAND_TYPE_DATA && session != 0) {
-          ret = session;
+        await for (Uint8List? data
+            in streamController.stream.timeout(timeout)) {
+          if (data != null) {
+            tcpDataRecv = data;
+            break;
+          }
         }
-        return ret;
-      }
 
-      return false;
+        if (tcpDataRecv == null) {
+          throw ZKNetworkError("Could not get response from device");
+        }
+
+        int tcpLength = Util.testTcpTop(tcpDataRecv);
+
+        if (tcpLength == 0) {
+          throw ZKNetworkError("TCP Packet is invalid");
+        }
+
+        header = ByteData.sublistView(
+            Uint8List.fromList(tcpDataRecv.sublist(8, 16)));
+
+        dataRecv = Uint8List.fromList(tcpDataRecv.sublist(8));
+      } else {
+        zkClient?.send(
+            buf, InternetAddress(ip, type: InternetAddressType.IPv4), port);
+
+        await for (Datagram datagram
+            in streamController.stream.timeout(timeout)) {
+          if (datagram.data.length < 8) {
+            throw ZKNetworkError("UDP Packet is invalid");
+          }
+
+          dataRecv = datagram.data;
+
+          header =
+              ByteData.sublistView(Uint8List.fromList(dataRecv.sublist(0, 8)));
+          break;
+        }
+      }
     } catch (e) {
-      debugPrint('Error: $e');
-      return false;
+      if (debug) {
+        debugPrint('Error: ${e.toString()}');
+      }
+      throw ZKNetworkError(e.toString());
     }
+
+    int response = header.getUint16(0, Endian.little);
+
+    if ([Util.CMD_ACK_OK, Util.CMD_PREPARE_DATA, Util.CMD_DATA]
+        .contains(response)) {
+      return {'status': true, 'code': response};
+    }
+    return {'status': false, 'code': response};
   }
 
   /// Unpacks the reply ID from the first 8 bytes of the data received.
@@ -160,7 +201,8 @@ class ZKTeco {
   ///
   /// This function must be called before any other functions in this class can
   /// be used.
-  Future<bool> connect() => Connect.connect(this);
+  Future<bool> connect({bool ommitPing = false}) =>
+      Connect.connect(this, ommitPing: ommitPing);
 
   /// Disconnects from the ZKTeco device.
   ///
@@ -205,7 +247,7 @@ class ZKTeco {
   /// The method returns a [Future] that completes with a [String] containing
   /// the platform of the device, or a [bool] indicating if the device could not
   /// be queried.
-  Future<dynamic> platform() => Platform.get(this);
+  Future<String?> platform() => Platform.get(this);
 
   /// Retrieves the version of the device's platform as a [String].
   ///
@@ -345,7 +387,7 @@ class ZKTeco {
   /// The method returns a [Future] that completes with a [String] containing
   /// the operating system of the device, or a [bool] indicating if the device
   /// could not be queried.
-  Future<dynamic> getOS() => Os.get(this);
+  Future<String?> getOS() => Os.get(this);
 
   /// Retrieves the current time of the device as a [String] in the format
   /// "YYYY-MM-DD HH:MM:SS".
@@ -357,7 +399,7 @@ class ZKTeco {
   /// The method returns a [Future] that completes with a [String] containing
   /// the current time of the device, or a [bool] indicating if the device
   /// could not be queried.
-  Future<dynamic> getTime() => Time.get(this);
+  Future<String?> getTime() => Time.get(this);
 
   /// Sets the device's time to the given [DateTime].
   ///
@@ -375,6 +417,8 @@ class ZKTeco {
   /// the SSR of the device, or a [bool] indicating if the device could not be
   /// queried.
   Future<dynamic> getSsr() => Ssr.get(this);
+
+  Future<String?> getWorkcode() => Workcode.get(this);
 
   /// Retrieves a fingerprint from the device with the given [uid].
   ///
