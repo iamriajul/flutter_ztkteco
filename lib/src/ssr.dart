@@ -15,12 +15,8 @@ class Ssr {
     int command = Util.CMD_DEVICE;
     String commandString = '~SSR';
 
-    dynamic reply = await self.command(command, commandString);
+    await self.command(command, commandString);
 
-    if (reply is bool) {
-      return reply;
-    }
-
-    return String.fromCharCodes(reply);
+    return String.fromCharCodes(self.dataRecv);
   }
 }

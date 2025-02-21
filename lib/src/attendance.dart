@@ -29,7 +29,7 @@ class Attendance {
       var session = await self.command(command, commandString,
           type: Util.COMMAND_TYPE_DATA);
 
-      if (session == false) {
+      if (session['status'] == false) {
         return [];
       }
 

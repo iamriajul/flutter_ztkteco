@@ -11,16 +11,16 @@ class SerialNumber {
   /// The method returns a [Future] that completes with a [String] containing
   /// the serial number of the device, or a [bool] indicating if the device
   /// could not be queried.
-  static Future<dynamic> get(ZKTeco self) async {
+  static Future<String?> get(ZKTeco self) async {
     int command = Util.CMD_DEVICE;
     String commandString = '~SerialNumber';
 
-    dynamic reply = await self.command(command, commandString);
+    var resp = await self.command(command, commandString);
 
-    if (reply is bool) {
-      return reply;
+    if (resp['status'] == false) {
+      return null;
     }
 
-    return String.fromCharCodes(reply);
+    return String.fromCharCodes(self.dataRecv.sublist(8, 35));
   }
 }

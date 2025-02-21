@@ -4,6 +4,14 @@
 
 A Flutter plugin to interface with fingerprint machines and retrieve attendance data, user information, and other related records. This plugin provides easy-to-use methods to communicate with fingerprint machines, extract data, and process it within your Flutter application.
 
+## Screenshots
+
+![Get OS](https://github.com/user-attachments/assets/0830c5b5-a110-453c-a0c8-e6ade05f9e02)
+![Get Platform](https://github.com/user-attachments/assets/72ec2ce5-62e3-4d44-a3c7-4cdd2de2e6cc)
+![Get Version](https://github.com/user-attachments/assets/5b16e6e9-20d1-4ce4-a2f5-f614d6a38920)
+![Get UserData](https://github.com/user-attachments/assets/573ee606-8e82-42de-9990-6da578ea9570)
+![Get FingerData](https://github.com/user-attachments/assets/41076497-d6a6-46a1-b72f-78c1e40411bf)
+
 ## Features
 
 - Connect to fingerprint machines via TCP/IP
@@ -20,7 +28,7 @@ Add this to your package's `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  flutter_zkteco: ^1.0.2
+  flutter_zkteco: ^1.1.0
 ```
 
 Then run:
@@ -48,10 +56,7 @@ import 'package:flutter_zkteco/flutter_zkteco.dart';
 
 ```dart
 // Create an instance of the ZKTeco class
-ZKTeco? fingerprintMachine = ZKTeco('192.168.1.201', port: 4370, timeout: Duration(seconds: 10));
-
-// Initialize socket
-await fingerprintMachine?.initSocket();
+ZKTeco? fingerprintMachine = ZKTeco('192.168.1.201', port: 4370, timeout: Duration(seconds: 10), tcp: true, debug: false, retry: 3);
 
 // Initialize the connection
 bool isConnected = await fingerprintMachine?.connect();
@@ -89,97 +94,14 @@ await fingerprintMachine?.disconnect();
 print('Disconnected from the fingerprint machine.');
 ```
 
-### Example
-
-Here’s a complete example demonstrating how to connect, retrieve data, and disconnect from the fingerprint machine:
-
-```dart
-import 'package:flutter/material.dart';
-import 'package:flutter_zkteco/flutter_zkteco.dart';
-
-void main() => runApp(MyApp());
-
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Fingerprint Machine Demo',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: MyHomePage(),
-    );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  @override
-  _MyHomePageState createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  ZKTeco fingerprintMachine;
-  List<AttendanceLog> logs = [];
-
-  @override
-  void initState() {
-    super.initState();
-    fingerprintMachine = ZKTeco('192.168.1.201', port: 4370);
-  }
-
-  Future<void> connectAndFetchLogs() async {
-    bool isConnected = await fingerprintMachine.connect();
-    if (isConnected) {
-      List<AttendanceLog> fetchedLogs = await fingerprintMachine.getAttendanceLogs();
-      setState(() {
-        logs = fetchedLogs;
-      });
-      await fingerprintMachine.disconnect();
-    } else {
-      print('Failed to connect.');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Fingerprint Logs'),
-      ),
-      body: Center(
-        child: Column(
-          children: [
-            ElevatedButton(
-              onPressed: connectAndFetchLogs,
-              child: Text('Fetch Logs'),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: logs.length,
-                itemBuilder: (context, index) {
-                  return ListTile(
-                    title: Text('User ID: ${logs[index].userId}'),
-                    subtitle: Text('Timestamp: ${logs[index].timestamp}'),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-```
-
 ## API
 
 ### `ZKTeco`
 
-- `ZKTeco(String ipAddress,{int port = 4370, Duration? timeout})`
+- `ZKTeco(String ipAddress,{int port = 4370, Duration? timeout, int retry = 3, bool tcp = true, bool debug = false, int? password})`
   - Creates an instance of the fingerprint machine with the specified IP address and port.
 
-- `Future<bool> connect()`
+- `Future<bool> connect({bool? ommitPing})`
   - Establishes a connection to the fingerprint machine.
 
 - `Future<List<AttendanceLog>> getAttendanceLogs()`

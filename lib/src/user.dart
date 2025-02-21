@@ -22,13 +22,16 @@ class User {
       dynamic session = await self.command(command, commandString,
           type: Util.COMMAND_TYPE_DATA);
 
-      if (session == false) {
+      if (session['status'] == false) {
         return [];
       }
+
       Uint8List? userData = await Util.recData(self, first: true);
 
       if (userData == null || userData.length <= 11) {
-        debugPrint('⚠️ No user data received.');
+        if (self.debug) {
+          debugPrint('⚠️ No user data received.');
+        }
         return [];
       }
 
@@ -53,11 +56,11 @@ class User {
 
         int role = int.tryParse(u.substring(6, 8), radix: 16) ?? 0;
 
-        String password = Util.extractString(u, 8, 24);
-        String name = Util.extractString(u, 24, 74);
-        String userId = Util.extractString(u, 98, 144);
+        String? password = Util.extractString(u, 8, 24);
+        String? name = Util.extractString(u, 24, 74);
+        String? userId = Util.extractString(u, 98, 144);
 
-        name = name.isNotEmpty ? name : userId;
+        name = name?.isNotEmpty == true ? name : userId;
 
         final Map<String, dynamic> data = {
           'uid': uid,
@@ -72,11 +75,15 @@ class User {
 
         user = user.sublist(chunkSize);
       }
-      debugPrint('✅ Successfully retrieved ${users.length} users.');
+      if (self.debug) {
+        debugPrint('✅ Successfully retrieved ${users.length} users.');
+      }
       return users;
     } catch (e, stackTrace) {
-      debugPrint('❌ Error retrieving users: $e');
-      debugPrint(stackTrace.toString());
+      if (self.debug) {
+        debugPrint('❌ Error retrieving users: $e');
+        debugPrint(stackTrace.toString());
+      }
       return [];
     }
   }
@@ -152,7 +159,7 @@ class User {
 
     try {
       dynamic response = await self.command(command, commandString);
-      if (response == false) {
+      if (response['status'] == false) {
         debugPrint('❌ Failed to set user.');
         return false;
       }
@@ -232,7 +239,7 @@ class User {
     try {
       dynamic response = await self.command(command, commandString);
 
-      if (response == false) {
+      if (response['status'] == false) {
         debugPrint('❌ Failed to remove user: UID $uid');
         return false;
       }
