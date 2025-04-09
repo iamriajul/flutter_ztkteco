@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_zkteco/flutter_zkteco.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
@@ -15,7 +17,7 @@ class Platform {
     int command = Util.CMD_DEVICE;
     String commandString = '~Platform';
 
-    var resp = await self.command(command, commandString);
+    var resp = await self.command(command, commandString: utf8.encode(commandString));
 
     if (resp['status'] == false) {
       return null;
@@ -37,7 +39,7 @@ class Platform {
     int command = Util.CMD_DEVICE;
     String commandString = '~ZKFPVersion';
 
-    await self.command(command, commandString);
+    await self.command(command, commandString: utf8.encode(commandString));
 
     return String.fromCharCodes(self.dataRecv.sublist(8, 23));
   }

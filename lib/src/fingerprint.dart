@@ -21,19 +21,18 @@ class Fingerprint {
   Future<Map<String, dynamic>> getFinger(
       ZKTeco self, int uid, int finger) async {
     int command = Util.CMD_USER_TEMP_RRQ;
-    String byte1 = String.fromCharCode(uid % 256);
-    String byte2 = String.fromCharCode(uid >> 8);
-    String commandString = byte1 + byte2 + String.fromCharCode(finger);
 
     Map<String, dynamic> result = {
       'size': 0,
       'tpl': '',
     };
 
-    var session = await self.command(command, commandString,
-        type: Util.COMMAND_TYPE_DATA);
+    var session = await self.command(
+      command,
+      commandString: Uint8List.fromList([uid % 256, uid >> 8, finger]),
+    );
 
-    if (session == false) {
+    if (session['status'] == false) {
       return result;
     }
 

@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_zkteco/flutter_zkteco.dart';
+import 'package:flutter_zkteco/src/finger_bridge.dart';
+import 'package:flutter_zkteco/src/model/memory_reader.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
 class User {
@@ -15,77 +19,121 @@ class User {
   /// the user ID, name, role, password, and card number. If the user name is
   /// empty, the user ID is used instead.
   static Future<List<UserInfo>> get(ZKTeco self) async {
-    try {
-      int command = Util.CMD_USER_TEMP_RRQ;
-      String commandString = String.fromCharCode(Util.FCT_USER);
+    // try {
+    MemoryReader? sizes = await Util.readSizes(self);
 
-      dynamic session = await self.command(command, commandString,
-          type: Util.COMMAND_TYPE_DATA);
-
-      if (session['status'] == false) {
-        return [];
-      }
-
-      Uint8List? userData = await Util.recData(self, first: true);
-
-      if (userData == null || userData.length <= 11) {
-        if (self.debug) {
-          debugPrint('⚠️ No user data received.');
-        }
-        return [];
-      }
-
-      List<UserInfo> users = [];
-      Uint8List user = userData.sublist(11);
-      int chunkSize = 72;
-
-      while (user.length >= chunkSize) {
-        String u =
-            Util.byteToHex(Uint8List.fromList(user.sublist(0, chunkSize)));
-        int? u1 = int.tryParse(u.substring(2, 4), radix: 16);
-        int? u2 = int.tryParse(u.substring(4, 6), radix: 16);
-        int? uid = (u1 != null && u2 != null) ? u1 + (u2 * 256) : null;
-
-        int? cardNo = int.tryParse(
-          u.substring(78, 80) +
-              u.substring(76, 78) +
-              u.substring(74, 76) +
-              u.substring(72, 74),
-          radix: 16,
-        );
-
-        int role = int.tryParse(u.substring(6, 8), radix: 16) ?? 0;
-
-        String? password = Util.extractString(u, 8, 24);
-        String? name = Util.extractString(u, 24, 74);
-        String? userId = Util.extractString(u, 98, 144);
-
-        name = name?.isNotEmpty == true ? name : userId;
-
-        final Map<String, dynamic> data = {
-          'uid': uid,
-          'userid': userId,
-          'name': name,
-          'role': role,
-          'password': password,
-          'cardno': cardNo,
-        };
-
-        users.add(UserInfo.fromJson(data));
-
-        user = user.sublist(chunkSize);
-      }
-      if (self.debug) {
-        debugPrint('✅ Successfully retrieved ${users.length} users.');
-      }
-      return users;
-    } catch (e, stackTrace) {
-      if (self.debug) {
-        debugPrint('❌ Error retrieving users: $e');
-        debugPrint(stackTrace.toString());
-      }
+    if (sizes?.users == 0) {
+      self.nextUid = 1;
+      self.nextUserId = '1';
       return [];
     }
+
+    List<UserInfo> users = [];
+    int maxUid = 0;
+
+    final results = await FingerBridge.readWithBuffer(
+        self, Util.CMD_USER_TEMP_RRQ,
+        fct: Util.FCT_USER);
+
+    final Uint8List userData = results.data;
+    final int size = results.size;
+
+    if (self.debug) debugPrint("user size $size (= ${userData.length})");
+
+    if (size <= 4) {
+      debugPrint("WRN: missing user data");
+      return [];
+    }
+
+    final totalSize =
+        ByteData.sublistView(userData, 0, 4).getUint32(0, Endian.little);
+    final int userPacketSize = (totalSize / sizes!.users!).round();
+    self.userPacketSize = userPacketSize;
+
+    if (![28, 72].contains(userPacketSize)) {
+      if (self.debug) debugPrint("WRN packet size would be $userPacketSize");
+    }
+
+    Uint8List data = userData.sublist(4);
+
+    while (data.length >= userPacketSize) {
+      if (userPacketSize == 28) {
+        final bd =
+            ByteData.sublistView(data.sublist(0, 28).buffer.asUint8List());
+
+        int uid = bd.getUint16(0, Endian.little);
+        int privilege = bd.getUint8(2);
+        String password =
+            String.fromCharCodes(data.sublist(3, 8)).split('\x00')[0];
+        String name =
+            String.fromCharCodes(data.sublist(8, 16)).split('\x00')[0].trim();
+        int card = bd.getUint32(16, Endian.little);
+        int groupId = bd.getUint8(20);
+        // int timezone = bd.getUint8(21);
+        int userId = bd.getUint32(24, Endian.little);
+
+        if (uid > maxUid) maxUid = uid;
+        if (name.isEmpty) name = "NN-$userId";
+
+        users.add(UserInfo(
+            uid: uid,
+            name: name,
+            role: privilege == 14 ? UserType.admin : UserType.user,
+            password: password,
+            groupId: groupId.toString(),
+            userId: userId.toString(),
+            cardNo: card));
+
+        data = data.sublist(28);
+      } else if (userPacketSize == 72) {
+        final bd = ByteData.sublistView(data.sublist(0, 72));
+
+        int uid = bd.getUint16(0, Endian.little);
+        int privilege = bd.getUint8(2);
+        String password =
+            String.fromCharCodes(data.sublist(3, 11)).split('\x00')[0];
+        String name =
+            String.fromCharCodes(data.sublist(11, 35)).split('\x00')[0].trim();
+        int card = bd.getUint32(35, Endian.little);
+        String groupId =
+            String.fromCharCodes(data.sublist(44, 68)).split('\x00')[0].trim();
+        String userId =
+            String.fromCharCodes(data.sublist(68, 72)).split('\x00')[0];
+
+        if (uid > maxUid) maxUid = uid;
+        if (name.isEmpty) name = "NN-$userId";
+
+        users.add(UserInfo(
+            uid: uid,
+            name: name,
+            role: privilege == 14 ? UserType.admin : UserType.user,
+            password: password,
+            groupId: groupId.toString(),
+            userId: userId.toString(),
+            cardNo: card));
+        data = data.sublist(72);
+      } else {
+        // Unexpected packet size
+        break;
+      }
+    }
+
+    maxUid += 1;
+    self.nextUid = maxUid;
+    self.nextUserId = maxUid.toString();
+
+    while (users.any((u) => u.userId == self.nextUserId)) {
+      maxUid += 1;
+      self.nextUserId = maxUid.toString();
+    }
+
+    if (self.debug) {
+      debugPrint('✅ Successfully retrieved ${users.length} users.');
+    }
+
+    await FingerBridge.freeData(self);
+
+    return users;
   }
 
   /// Sets a user in the device.
@@ -158,7 +206,8 @@ class User {
         ''.padRight(15, '\x00');
 
     try {
-      dynamic response = await self.command(command, commandString);
+      dynamic response = await self.command(command,
+          commandString: Uint8List.fromList(commandString.codeUnits));
       if (response['status'] == false) {
         debugPrint('❌ Failed to set user.');
         return false;
@@ -193,9 +242,8 @@ class User {
   /// message if the device could not be queried.
   static Future<dynamic> clear(ZKTeco self) async {
     int command = Util.CMD_CLEAR_DATA;
-    String commandString = '';
 
-    return await self.command(command, commandString);
+    return await self.command(command);
   }
 
   /// Clears an administrator from the device.
@@ -208,9 +256,8 @@ class User {
   /// error message if the device could not be queried.
   static Future<dynamic> clearAdmin(ZKTeco self) async {
     int command = Util.CMD_CLEAR_ADMIN;
-    String commandString = '';
 
-    return await self.command(command, commandString);
+    return await self.command(command);
   }
 
   /// Removes a user from the device.
@@ -237,7 +284,8 @@ class User {
         String.fromCharCode((uid >> 8) & 0xFF);
 
     try {
-      dynamic response = await self.command(command, commandString);
+      dynamic response = await self.command(command,
+          commandString: Uint8List.fromList(commandString.codeUnits));
 
       if (response['status'] == false) {
         debugPrint('❌ Failed to remove user: UID $uid');

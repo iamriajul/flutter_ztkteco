@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_zkteco/flutter_zkteco.dart';
 import 'package:flutter_zkteco/src/error/zk_error_connection.dart';
+import 'package:flutter_zkteco/src/finger_bridge.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
 class Connect {
@@ -27,27 +28,31 @@ class Connect {
       self.userPacketSize = 72;
     }
 
-    await Util.createSocket(self);
-    int command = Util.CMD_CONNECT;
-    String commandString = '';
+    await resetStreamController(self);
+
+    await FingerBridge.createSocket(self);
 
     try {
-      var response = await self.command(command, commandString);
-      self.sessionId = (self.dataRecv[5] << 8) | self.dataRecv[4];
+      self.sessionId = 0;
+      self.replyId = Util.USHRT_MAX - 1;
+
+      Map<String, dynamic> response = await self.command(Util.CMD_CONNECT);
+
+      self.sessionId = self.header[2];
 
       if (response['code'] == Util.CMD_ACK_UNAUTH) {
         if (self.debug) {
           debugPrint('Try Auth');
         }
 
-        if (self.password == null) {
-          throw ZKErrorConnection('Password is null');
+        if (self.password?.isEmpty == true) {
+          throw ZKErrorConnection('Password is empty');
         }
 
         var commandString = Util.makeCommKey(self.password!, self.sessionId);
 
-        response = await self.command(
-            Util.CMD_AUTH, String.fromCharCodes(commandString));
+        response =
+            await self.command(Util.CMD_AUTH, commandString: commandString);
       }
 
       if (response['status']) {
@@ -85,23 +90,26 @@ class Connect {
   /// if the device does not respond or the acknowledgement is invalid.
   static Future<bool> disconnect(ZKTeco self) async {
     try {
-      int command = Util.CMD_EXIT;
-      String commandString = '';
+      final Map<String, dynamic> response = await self.command(Util.CMD_EXIT);
 
-      var response = await self.command(command, commandString);
-
-      if (response['status']) {
+      if (response['status'] == true) {
         self.isConnect = false;
 
+        // Close UDP or TCP
         if (!self.tcp && self.zkClient != null) {
           self.zkClient?.close();
+          self.zkClient = null;
         }
 
         if (self.tcp && self.zkSocket != null) {
-          self.zkSocket?.close();
+          await self.zkSocket?.close();
+          self.zkSocket = null;
         }
 
-        self.streamController.close();
+        // Check and close streamController safely
+        if (!self.streamController.isClosed) {
+          await self.streamController.close();
+        }
 
         return true;
       } else {
@@ -110,6 +118,13 @@ class Connect {
     } catch (e) {
       throw ZKNetworkError("Error during disconnection: $e");
     }
+  }
+
+  static Future<void> resetStreamController(ZKTeco self) async {
+    if (!self.streamController.isClosed) {
+      await self.streamController.close();
+    }
+    self.streamController = StreamController.broadcast();
   }
 
   /// Starts the verification process on the device.
@@ -122,11 +137,9 @@ class Connect {
   /// an error message if the device could not be queried.
   static Future<dynamic> verifyAuth(ZKTeco self) async {
     int command = Util.CMD_STARTVERIFY;
-    String commandString = '';
 
-    var session = await self.command(command, commandString,
-        type: Util.COMMAND_TYPE_DATA);
-    if (session == false) {
+    var session = await self.command(command);
+    if (session['status'] == false) {
       return [];
     }
   }

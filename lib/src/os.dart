@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_zkteco/flutter_zkteco.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
@@ -15,7 +17,7 @@ class Os {
     int command = Util.CMD_DEVICE;
     String commandString = '~OS';
 
-    var resp = await self.command(command, commandString);
+    var resp = await self.command(command, commandString: utf8.encode(commandString));
 
     if (resp['status'] == false) {
       return null;

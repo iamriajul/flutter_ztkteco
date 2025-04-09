@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_zkteco/flutter_zkteco.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
@@ -15,7 +17,7 @@ class Ssr {
     int command = Util.CMD_DEVICE;
     String commandString = '~SSR';
 
-    await self.command(command, commandString);
+    await self.command(command, commandString: utf8.encode(commandString));
 
     return String.fromCharCodes(self.dataRecv);
   }

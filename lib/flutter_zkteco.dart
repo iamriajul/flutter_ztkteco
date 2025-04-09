@@ -56,21 +56,28 @@ class ZKTeco {
 
   // The stream controller used to receive the datagrams
   Completer<Datagram?> completer = Completer();
-  StreamController streamController = StreamController.broadcast();
+  StreamController<Uint8List> streamController = StreamController.broadcast();
 
   // The data received from the device
-  List<int> dataRecv = List.empty(growable: true);
+  late Uint8List dataRecv;
+
+  late List<int> data;
+
+  int tcpLength = 0;
 
   // The session ID
   int sessionId = 0;
 
   int replyId = -1 + Util.USHRT_MAX;
 
-  ByteData header = ByteData(0);
+  late List<int> header;
 
   bool isConnect = false;
 
-  int? password;
+  String? password;
+
+  late int nextUid;
+  late String nextUserId;
 
   // Constructor for ZKTeco
   ZKTeco(this.ip,
@@ -92,15 +99,11 @@ class ZKTeco {
   ///
   /// The method returns a [Future] that completes with the response from the
   /// device, or [false] if an error occurred.
-  Future<dynamic> command(int command, String commandString,
-      {String type = Util.COMMAND_TYPE_GENERAL, int reponseSize = 8}) async {
+  Future<Map<String, dynamic>> command(int command,
+      {List<int> commandString = const []}) async {
     if (![Util.CMD_CONNECT, Util.CMD_AUTH].contains(command) && !isConnect) {
       throw ZKErrorConnection("Instance is not connected.");
     }
-
-    int sessionId = this.sessionId;
-
-    int replyId = !isConnect ? this.replyId : getReplyId();
 
     List<int> buf =
         Util.createHeader(command, sessionId, replyId, commandString);
@@ -108,50 +111,46 @@ class ZKTeco {
     try {
       if (tcp == true) {
         List<int> top = Util.createTcpTop(buf);
+
         zkSocket?.add(top);
 
-        await zkSocket?.flush();
+        final data = await streamController.stream.first;
 
-        List<int>? tcpDataRecv;
+        final Uint8List tcpDataRecv = data;
 
-        await for (Uint8List? data
-            in streamController.stream.timeout(timeout)) {
-          if (data != null) {
-            tcpDataRecv = data;
-            break;
-          }
+        if (tcpDataRecv.length < 8) {
+          throw ZKNetworkError(
+              "Could not get response from device (Incomplete Data)");
         }
 
-        if (tcpDataRecv == null) {
-          throw ZKNetworkError("Could not get response from device");
-        }
-
-        int tcpLength = Util.testTcpTop(tcpDataRecv);
-
+        tcpLength = Util.testTcpTop(tcpDataRecv);
         if (tcpLength == 0) {
           throw ZKNetworkError("TCP Packet is invalid");
         }
 
-        header = ByteData.sublistView(
-            Uint8List.fromList(tcpDataRecv.sublist(8, 16)));
+        final byteData = ByteData.sublistView(tcpDataRecv, 8, 16);
+        header = [
+          byteData.getUint16(0, Endian.little),
+          byteData.getUint16(2, Endian.little),
+          byteData.getUint16(4, Endian.little),
+          byteData.getUint16(6, Endian.little),
+        ];
 
-        dataRecv = Uint8List.fromList(tcpDataRecv.sublist(8));
+        dataRecv = tcpDataRecv.sublist(8);
       } else {
         zkClient?.send(
             buf, InternetAddress(ip, type: InternetAddressType.IPv4), port);
 
-        await for (Datagram datagram
-            in streamController.stream.timeout(timeout)) {
-          if (datagram.data.length < 8) {
-            throw ZKNetworkError("UDP Packet is invalid");
-          }
+        final data = await streamController.stream.first;
 
-          dataRecv = datagram.data;
-
-          header =
-              ByteData.sublistView(Uint8List.fromList(dataRecv.sublist(0, 8)));
-          break;
-        }
+        dataRecv = data;
+        final byteData = ByteData.sublistView(dataRecv, 0, 8);
+        header = [
+          byteData.getUint16(0, Endian.little),
+          byteData.getUint16(2, Endian.little),
+          byteData.getUint16(4, Endian.little),
+          byteData.getUint16(6, Endian.little),
+        ];
       }
     } catch (e) {
       if (debug) {
@@ -160,7 +159,9 @@ class ZKTeco {
       throw ZKNetworkError(e.toString());
     }
 
-    int response = header.getUint16(0, Endian.little);
+    int response = header[0];
+    replyId = header[3];
+    data = dataRecv.sublist(8);
 
     if ([Util.CMD_ACK_OK, Util.CMD_PREPARE_DATA, Util.CMD_DATA]
         .contains(response)) {

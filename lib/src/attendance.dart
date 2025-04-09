@@ -1,10 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 // import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_zkteco/flutter_zkteco.dart';
+import 'package:flutter_zkteco/src/finger_bridge.dart';
+import 'package:flutter_zkteco/src/model/memory_reader.dart';
+import 'package:flutter_zkteco/src/model/read_buffer_result.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
 class Attendance {
@@ -23,55 +25,112 @@ class Attendance {
   /// user name is empty, the user ID is used instead.
   static Future<List<AttendanceLog>> get(ZKTeco self) async {
     try {
-      int command = Util.CMD_ATT_LOG_RRQ;
-      String commandString = '';
+      MemoryReader? sizes = await Util.readSizes(self);
 
-      var session = await self.command(command, commandString,
-          type: Util.COMMAND_TYPE_DATA);
-
-      if (session['status'] == false) {
+      if (sizes?.records == 0) {
         return [];
       }
 
-      Uint8List? attData = await Util.recData(self);
+      List<UserInfo> users = await self.getUsers();
 
-      List<AttendanceLog> attendance = [];
+      List<AttendanceLog> attendances = [];
 
-      if (attData == null || attData.length <= 10) {
+      ReadBufferResult? results =
+          await FingerBridge.readWithBuffer(self, Util.CMD_ATT_LOG_RRQ);
+
+      final Uint8List attendanceDataRaw = results.data;
+      final int size = results.data.length;
+
+      if (size < 4) {
+        if (self.debug) debugPrint("WRN: no attendance data");
         return [];
       }
 
-      attData = attData.sublist(10);
+      final ByteData sizeData = ByteData.sublistView(attendanceDataRaw, 0, 4);
+      final int totalSize = sizeData.getUint32(0, Endian.little);
+      final int recordSize = totalSize ~/ sizes!.records!;
 
-      int chunkSize = 40;
+      if (self.debug) debugPrint("record_size is $recordSize");
 
-      while (attData!.length >= chunkSize) {
-        String u = Util.byteToHex(Uint8List.fromList(attData.sublist(0, 39)));
-        int? u1 = int.tryParse(u.substring(4, 6), radix: 16);
-        int? u2 = int.tryParse(u.substring(6, 8), radix: 16);
-        int? uid = (u1 != null && u2 != null) ? u1 + (u2 * 256) : null;
+      Uint8List attendanceData = attendanceDataRaw.sublist(4);
 
-        List<String>? id = utf8
-            .decode(Util.hex2bin(u.substring(8, 18)), allowMalformed: true)
-            .split('\x00');
-        int state = int.parse(u.substring(56, 58), radix: 16);
-        String timestamp = Util.decodeTime(
-            int.parse(Util.reverseHex(u.substring(58, 66)), radix: 16));
-        int type = int.parse(Util.reverseHex(u.substring(66, 68)), radix: 16);
+      if (recordSize == 8) {
+        while (attendanceData.length >= 8) {
+          ByteData record = ByteData.sublistView(
+              Uint8List.fromList(attendanceData.sublist(0, 8)));
+          int uid = record.getUint16(0, Endian.little);
+          int status = record.getUint8(2);
+          int timestamp = record.getUint32(3, Endian.little);
+          int punch = record.getUint8(7);
 
-        final Map<String, dynamic> data = {
-          'uid': uid,
-          'id': id[0],
-          'state': state,
-          'timestamp': timestamp,
-          'type': type,
-        };
-        attendance.add(AttendanceLog.fromJson(data));
+          attendanceData = attendanceData.sublist(8);
 
-        attData = attData.sublist(chunkSize);
+          UserInfo? userMatch = users.firstWhere((u) => u.uid == uid,
+              orElse: () => UserInfo(uid: uid, userId: uid.toString()));
+          String? userId = userMatch.userId ?? uid.toString();
+
+          String timestampStr = Util.decodeTime(timestamp);
+          attendances.add(AttendanceLog(
+              uid: uid,
+              timestamp: timestampStr,
+              state: status,
+              type: punch,
+              id: userId));
+        }
+      } else if (recordSize == 16) {
+        while (attendanceData.length >= 16) {
+          ByteData data = ByteData.sublistView(
+              Uint8List.fromList(attendanceData.sublist(0, 16)));
+          int userId = data.getUint32(0, Endian.little);
+          int timestamp = data.getUint32(4, Endian.little);
+          int status = data.getUint8(8);
+          int punch = data.getUint8(9);
+
+          attendanceData = attendanceData.sublist(16);
+
+          UserInfo? tuser = users.firstWhere(
+              (u) => u.userId == userId.toString(),
+              orElse: () => const UserInfo());
+          int? uid = tuser.userId != null ? tuser.uid : userId;
+
+          String timestampStr = Util.decodeTime(timestamp);
+          attendances.add(AttendanceLog(
+              id: userId.toString(),
+              timestamp: timestampStr,
+              state: status,
+              type: punch,
+              uid: uid));
+        }
+      } else {
+        while (attendanceData.length >= 40) {
+          ByteData data = ByteData.sublistView(
+              Uint8List.fromList(attendanceData.sublist(0, 40)));
+          int uid = data.getUint16(0, Endian.little);
+          List<int> userIdBytes = attendanceData.sublist(2, 26);
+          int status = data.getUint8(26);
+          int timestamp = data.getUint32(27, Endian.little);
+          int punch = data.getUint8(31);
+
+          String userId = String.fromCharCodes(userIdBytes).split('\x00')[0];
+          String timestampStr = Util.decodeTime(timestamp);
+
+          attendances.add(AttendanceLog(
+              id: userId,
+              timestamp: timestampStr,
+              state: status,
+              type: punch,
+              uid: uid));
+          attendanceData = attendanceData.sublist(recordSize);
+        }
       }
-      debugPrint('✅ Successfully retrieved ${attendance.length} records.');
-      return attendance;
+
+      if (self.debug) {
+        debugPrint('✅ Successfully retrieved ${attendances.length} records.');
+      }
+
+      await FingerBridge.freeData(self);
+
+      return attendances;
     } catch (e, stackTrace) {
       debugPrint('❌ Error retrieving attendances: $e');
       debugPrint(stackTrace.toString());
@@ -79,13 +138,14 @@ class Attendance {
     }
   }
 
-  static _regEvent(ZKTeco self, int flags) async {
+  static regEvent(ZKTeco self, int flags) async {
     int command = Util.CMD_REG_EVENT;
-    String commandString = String.fromCharCode(flags);
 
-    var session = await self.command(command, commandString,
-        type: Util.COMMAND_TYPE_DATA);
-    if (session == false) {
+    var session = await self.command(
+      command,
+      commandString: Uint8List.fromList([flags]),
+    );
+    if (session['status'] == false) {
       return [];
     }
   }
@@ -108,11 +168,9 @@ class Attendance {
 
   static dynamic cancelLiveCapture(ZKTeco self) async {
     int command = Util.CMD_CANCELCAPTURE;
-    String commandString = '';
 
-    var session = await self.command(command, commandString,
-        type: Util.COMMAND_TYPE_DATA);
-    if (session == false) {
+    var session = await self.command(command);
+    if (session['status'] == false) {
       return [];
     }
   }
@@ -133,7 +191,7 @@ class Attendance {
     await self.enableDevice();
 
     debugPrint('Registering Event');
-    await _regEvent(self, Util.EF_ATTLOG);
+    await regEvent(self, Util.EF_ATTLOG);
 
     while (self.liveCapture) {
       try {
@@ -143,7 +201,7 @@ class Attendance {
         List<int> dataRecv = await _socket.first;
 
         // Process the received data
-        AttendanceLog? attendance = _liveAttendanceData(dataRecv, users);
+        AttendanceLog? attendance = liveAttendanceData(dataRecv, users);
         yield attendance;
       } on TimeoutException {
         debugPrint("Timeout");
@@ -157,7 +215,7 @@ class Attendance {
     }
   }
 
-  static AttendanceLog? _liveAttendanceData(
+  static AttendanceLog? liveAttendanceData(
       List<int> dataRecv, List<UserInfo> users) {
     if (dataRecv.isEmpty) return null;
 
@@ -196,8 +254,7 @@ class Attendance {
   /// error message if the device could not be queried.
   static Future<dynamic> clear(ZKTeco self) async {
     int command = Util.CMD_CLEAR_ATT_LOG;
-    String commandString = '';
 
-    return await self.command(command, commandString);
+    return await self.command(command);
   }
 }

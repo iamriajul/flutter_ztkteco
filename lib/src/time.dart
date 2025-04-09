@@ -19,7 +19,7 @@ class Time {
 
       // Send command and wait for reply
       var resp =
-          await self.command(command, String.fromCharCodes(commandBytes));
+          await self.command(command, commandString: commandBytes);
 
       if (resp['status'] == false) {
         return null;
@@ -48,7 +48,7 @@ class Time {
   static Future<String?> get(ZKTeco self) async {
     int command = Util.CMD_GET_TIME;
     try {
-      await self.command(command, '');
+      await self.command(command);
 
       // Convert binary response to time
       Uint8List reverseHexBytes = Util.hex2bin(
