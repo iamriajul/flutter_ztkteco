@@ -79,6 +79,8 @@ class ZKTeco {
   late int nextUid;
   late String nextUserId;
 
+  bool isEnabled = true;
+
   // Constructor for ZKTeco
   ZKTeco(this.ip,
       {this.port = 4370,
@@ -168,28 +170,6 @@ class ZKTeco {
       return {'status': true, 'code': response};
     }
     return {'status': false, 'code': response};
-  }
-
-  /// Unpacks the reply ID from the first 8 bytes of the data received.
-  ///
-  /// The reply ID is a 16-bit unsigned integer, stored in two bytes.
-  /// The first byte is at position 7 (index 6) and the second byte is at
-  /// position 8 (index 7). The two bytes are concatenated and converted
-  /// to decimal to form the reply ID.
-  int getReplyId() {
-    ByteData byteData = ByteData.sublistView(Uint8List.fromList(dataRecv));
-
-    int h7 = byteData.getUint8(6); // Byte at position 7 (index 6)
-    int h8 = byteData.getUint8(7); // Byte at position 8 (index 7)
-
-    // Convert them to hexadecimal and concatenate
-    String hexH7 = h7.toRadixString(16).padLeft(2, '0');
-    String hexH8 = h8.toRadixString(16).padLeft(2, '0');
-
-    String replyIdHex = hexH8 + hexH7;
-
-    // Convert concatenated hex to decimal
-    return int.parse(replyIdHex, radix: 16);
   }
 
   /// Connects to the ZKTeco device.
@@ -283,7 +263,7 @@ class ZKTeco {
   ///
   /// If the device is already enabled, this method does nothing and returns
   /// [true].
-  Future<dynamic> enableDevice() => Device.enable(this);
+  Future<bool> enableDevice() => Device.enable(this);
 
   /// Disables the device.
   //
@@ -296,7 +276,7 @@ class ZKTeco {
   //
   /// If the device is already disabled, this method does nothing and returns
   /// [true].
-  Future<dynamic> disableDevice() => Device.disable(this);
+  Future<bool> disableDevice() => Device.disable(this);
 
   /// Powers off the device.
   ///
@@ -390,17 +370,16 @@ class ZKTeco {
   /// could not be queried.
   Future<String?> getOS() => Os.get(this);
 
-  /// Retrieves the current time of the device as a [String] in the format
-  /// "YYYY-MM-DD HH:MM:SS".
+  /// Retrieves the current time of the device as a [DateTime].
   ///
   /// This method sends a command to the device to retrieve its current time.
   /// The device must be connected and authenticated before this method can be
   /// used.
   ///
-  /// The method returns a [Future] that completes with a [String] containing
+  /// The method returns a [Future] that completes with a [DateTime] containing
   /// the current time of the device, or a [bool] indicating if the device
   /// could not be queried.
-  Future<String?> getTime() => Time.get(this);
+  Future<DateTime?> getTime() => Time.get(this);
 
   /// Sets the device's time to the given [DateTime].
   ///
@@ -543,21 +522,30 @@ class ZKTeco {
   /// error message if the device could not be queried.
   Future<dynamic> clearAttendance() => Attendance.clear(this);
 
-  /// Enables live capture of attendance records from the device.
-  ///
-  /// When enabled, the device will send attendance records in real-time to the
-  /// Flutter application. The records are received by the
-  /// [onAttendanceRecordReceived] callback.
-  Future<void> enableLiveCapture() => Attendance.enableLiveCapture(this);
-
   /// Disables live capture of attendance records from the device.
   ///
   /// When disabled, the device will no longer send attendance records in
   /// real-time to the Flutter application. The device must be connected and
   /// authenticated before this method can be used.
-  Future<void> cancelLiveCapture() => Attendance.cancelLiveCapture(this);
+  Future<bool> cancelLiveCapture() => Attendance.cancelLiveCapture(this);
 
-  Future<dynamic> verifyAuthentication() => Connect.verifyAuth(this);
+  /// Verifies the authentication of the device.
+  ///
+  /// The method sends a command to the device to verify its authentication. The
+  /// device must be connected and authenticated before this method can be used.
+  ///
+  /// The method returns a [Future] that completes with a [bool] indicating if the
+  /// device was successfully authenticated, or a [String] containing an error
+  /// message if the device could not be queried.
+  Future<bool> verifyAuthentication() => Connect.verifyAuth(this);
+
+  /// Sends an acknowledgment to the device that the last command was received
+  /// successfully.
+  ///
+  /// This method sends a command to the device to acknowledge that the last
+  /// command was successfully received. The device must be connected and
+  /// authenticated before this method can be used.
+  Future<void> ackOk() => Connect.ackOk(this);
 
   Stream<AttendanceLog?> get onAttendanceRecordReceived =>
       Attendance.streamLiveCapture(this);

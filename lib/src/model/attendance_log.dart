@@ -2,7 +2,7 @@ class AttendanceLog {
   final int? uid;
   final String? id;
   final int? state;
-  final String? timestamp;
+  final DateTime? timestamp;
   final int? type;
 
   const AttendanceLog({

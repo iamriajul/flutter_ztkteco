@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -134,20 +133,22 @@ class Util {
     return daysSinceEpoch + secondsInDay;
   }
 
-  /// Decodes a [int] received from the device into a [DateTime].
+  /// Decodes an integer [t] into a [DateTime] object.
   ///
-  /// The [int] is parsed into its constituent parts, then converted into a
-  /// [DateTime] object. The formula used is:
+  /// The integer is assumed to represent the number of seconds since the start
+  /// of the 21st century (year 2000). The decoding process involves extracting
+  /// the year, month, day, hour, minute, and second components from the integer
+  /// by performing a series of modulus and division operations. The resulting
+  /// components are used to construct and return a [DateTime] object.
   ///
-  ///   year = t ~/ 12 + 2000
-  ///   month = t % 12 + 1
-  ///   day = t % 31 + 1
-  ///   hour = t % 24
-  ///   minute = t % 60
-  ///   second = t % 60
-  ///
-  /// This method returns a [String] containing the [DateTime] in ISO8601 format.
-  static String decodeTime(int t) {
+  /// This method assumes the date and time are encoded with the following scheme:
+  /// - Seconds in a minute: 0-59
+  /// - Minutes in an hour: 0-59
+  /// - Hours in a day: 0-23
+  /// - Days in a month: 1-31
+  /// - Months in a year: 1-12
+  /// - Years since 2000: 0-99
+  static DateTime decodeTime(int t) {
     int second = t % 60;
     t = t ~/ 60;
 
@@ -165,7 +166,22 @@ class Util {
 
     int year = t + 2000;
 
-    return DateTime(year, month, day, hour, minute, second).toIso8601String();
+    return DateTime(year, month, day, hour, minute, second);
+  }
+
+  static DateTime decodeTimeHex(List<int> timehex) {
+    if (timehex.length < 6) {
+      throw ArgumentError("Invalid timehex length: ${timehex.length}");
+    }
+
+    final year = timehex[0] + 2000;
+    final month = timehex[1];
+    final day = timehex[2];
+    final hour = timehex[3];
+    final minute = timehex[4];
+    final second = timehex[5];
+
+    return DateTime(year, month, day, hour, minute, second);
   }
 
   /// Converts a [Uint8List] of bytes into a hexadecimal string.
@@ -724,26 +740,26 @@ class Util {
     return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
   }
 
-  /// Extracts a UTF-8 encoded string from a hexadecimal string.
+  /// Extracts a string from a [Uint8List] of bytes.
   ///
-  /// The method takes a [hexString] and extracts a substring from the given
-  /// [start] index to the [end] index, then converts it into binary data.
-  /// The binary data is decoded using UTF-8, allowing malformed sequences,
-  /// and the result is split at the first null character (`\x00`). The
-  /// leading and trailing whitespace is removed from the resulting string,
-  /// which is then returned.
+  /// The method converts the byte list to a string and splits it at the first
+  /// null character (`\x00`). The resulting string before the null character
+  /// is returned. If the [trim] parameter is [true], the returned string is
+  /// trimmed of any leading and trailing whitespace.
+  ///
+  /// - [bytes]: The input byte list to extract the string from.
+  /// - [trim]: An optional parameter. If set to [true], the extracted string
+  ///   is trimmed. Defaults to [false].
+  ///
+  /// Returns the extracted string, or `null` if the input byte list is empty.
+  static String extractString(Uint8List bytes, {bool? trim}) {
+    String value = String.fromCharCodes(bytes).split('\x00')[0];
 
-  static String? extractString(String hexString, int start, int end) {
-    // Ensure that the end doesn't exceed the length of the string
-    end = end > hexString.length ? hexString.length : end;
+    if (trim == true) {
+      return value.trim();
+    }
 
-    Uint8List binaryData = Util.hex2bin(hexString.substring(start, end));
-
-    String decodedString =
-        utf8.decode(binaryData, allowMalformed: true).split('\x00')[0].trim();
-
-    // If decodedString is empty, return a default or handle accordingly
-    return decodedString.isNotEmpty ? decodedString : null;
+    return value;
   }
 
   /// Creates a TCP packet with a header and appends the given data.

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_zkteco/flutter_zkteco.dart';
@@ -135,12 +136,44 @@ class Connect {
   /// The method returns a [Future] that completes with a [bool] indicating if
   /// the verification process was successfully started, or a [String] containing
   /// an error message if the device could not be queried.
-  static Future<dynamic> verifyAuth(ZKTeco self) async {
-    int command = Util.CMD_STARTVERIFY;
+  static Future<bool> verifyAuth(ZKTeco self) async {
+    final Map<String, dynamic> response =
+        await self.command(Util.CMD_STARTVERIFY);
+    if (response['status'] == true) {
+      return true;
+    }
 
-    var session = await self.command(command);
-    if (session['status'] == false) {
-      return [];
+    throw ZKNetworkError("Can't verify auth");
+  }
+
+  /// Sends an acknowledgment to the device that the last command was received successfully.
+  ///
+  /// This function creates a header with the [CMD_ACK_OK] command and sends it to the device
+  /// using either TCP or UDP, depending on the connection type. If the connection is over TCP,
+  /// the header is wrapped in a TCP packet before being sent. If the connection is over UDP,
+  /// the header is sent directly to the device's IP and port.
+  ///
+  /// The method requires an active connection to the device and uses the session ID of the
+  /// [ZKTeco] instance to construct the header.
+  ///
+  /// Throws a [ZKNetworkError] if an error occurs during the acknowledgment process.
+  static Future<void> ackOk(ZKTeco self) async {
+    try {
+      final List<int> buf = Util.createHeader(
+        Util.CMD_ACK_OK,
+        self.sessionId,
+        Util.USHRT_MAX - 1,
+        [],
+      );
+
+      if (self.tcp) {
+        final Uint8List top = Util.createTcpTop(buf);
+        self.zkSocket?.add(top);
+      } else {
+        self.zkClient?.send(buf, InternetAddress(self.ip), self.port);
+      }
+    } catch (e) {
+      throw ZKNetworkError(e.toString());
     }
   }
 }

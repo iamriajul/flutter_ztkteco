@@ -63,10 +63,8 @@ class User {
 
         int uid = bd.getUint16(0, Endian.little);
         int privilege = bd.getUint8(2);
-        String password =
-            String.fromCharCodes(data.sublist(3, 8)).split('\x00')[0];
-        String name =
-            String.fromCharCodes(data.sublist(8, 16)).split('\x00')[0].trim();
+        String password = Util.extractString(data.sublist(3, 8));
+        String name = Util.extractString(data.sublist(8, 16), trim: true);
         int card = bd.getUint32(16, Endian.little);
         int groupId = bd.getUint8(20);
         // int timezone = bd.getUint8(21);
@@ -90,15 +88,11 @@ class User {
 
         int uid = bd.getUint16(0, Endian.little);
         int privilege = bd.getUint8(2);
-        String password =
-            String.fromCharCodes(data.sublist(3, 11)).split('\x00')[0];
-        String name =
-            String.fromCharCodes(data.sublist(11, 35)).split('\x00')[0].trim();
+        String password = Util.extractString(data.sublist(3, 11));
+        String name = Util.extractString(data.sublist(11, 35), trim: true);
         int card = bd.getUint32(35, Endian.little);
-        String groupId =
-            String.fromCharCodes(data.sublist(44, 68)).split('\x00')[0].trim();
-        String userId =
-            String.fromCharCodes(data.sublist(68, 72)).split('\x00')[0];
+        String groupId = Util.extractString(data.sublist(44, 68), trim: true);
+        String userId = Util.extractString(data.sublist(68, 72));
 
         if (uid > maxUid) maxUid = uid;
         if (name.isEmpty) name = "NN-$userId";

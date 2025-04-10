@@ -1,7 +1,10 @@
-## 1.1.1
+## 1.2.0
 
 * Change method to get data users and attendance using buffer method
 
+* Added live attendance
+
+* Added example using live attendance
 
 ## 1.1.0
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -58,9 +59,11 @@ class _MyHomePageState extends State<MyHomePage> {
   List<UserInfo> users = [];
   List<AttendanceLog> attendances = [];
   bool loadingContent = false;
+  bool isLive = false;
   bool useTcp = true;
-  int totalTab = 8;
+  int totalTab = 9;
   String message = '';
+  StreamSubscription<AttendanceLog?>? live;
 
   void _connectFp() async {
     try {
@@ -110,11 +113,6 @@ class _MyHomePageState extends State<MyHomePage> {
     });
     var attendances = await fingerprintMachine?.getAttendanceLogs() ?? [];
 
-    for (var attend in attendances) {
-      debugPrint(
-          '${attend.id} - ${attend.timestamp} - ${attend.uid} - ${attend.state} - ${attend.type}');
-    }
-
     setState(() {
       this.attendances = attendances;
       loadingContent = false;
@@ -153,10 +151,10 @@ class _MyHomePageState extends State<MyHomePage> {
       loadingContent = true;
     });
 
-    String? time = await fingerprintMachine?.getTime();
+    DateTime? time = await fingerprintMachine?.getTime();
 
     setState(() {
-      message = time ?? '';
+      message = time?.toIso8601String() ?? '';
       loadingContent = false;
     });
   }
@@ -206,6 +204,32 @@ class _MyHomePageState extends State<MyHomePage> {
       btnMessage = 'Connect';
       isConnected = false;
     });
+  }
+
+  void startLive() {
+    setState(() {
+      isLive = true;
+    });
+    live = fingerprintMachine?.onAttendanceRecordReceived
+        .listen((AttendanceLog? log) {
+      if (log?.id != null) {
+        setState(() {
+          attendances.add(log!);
+        });
+      }
+    });
+  }
+
+  void endLive() async {
+    try {
+      await fingerprintMachine?.cancelLiveCapture();
+      live?.cancel();
+      setState(() {
+        isLive = false;
+      });
+    } catch (e) {
+      debugPrint(e.toString());
+    }
   }
 
   Widget _buildResponsiveForm() {
@@ -347,7 +371,7 @@ class _MyHomePageState extends State<MyHomePage> {
                           getUserData();
                         } else if (value == 7) {
                           getAttendancesData();
-                        }
+                        } else if (value == 8) {}
                         currentIndex = value;
                       },
                       tabs: [
@@ -374,6 +398,9 @@ class _MyHomePageState extends State<MyHomePage> {
                         ),
                         Tab(
                           text: 'Get Attendances Data',
+                        ),
+                        Tab(
+                          text: 'Live Attendances Data',
                         ),
                       ],
                     )
@@ -409,7 +436,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     itemBuilder: (_, index) {
                       final user = users[index];
                       return ListTile(
-                        title: Text(user.userId ?? '-'),
+                        title: Text(user.uid?.toString() ?? '-'),
                         subtitle: Text(user.name ?? '-'),
                       );
                     },
@@ -422,11 +449,43 @@ class _MyHomePageState extends State<MyHomePage> {
                       final attendance = attendances[index];
                       return ListTile(
                         title: Text(attendance.id ?? '-'),
-                        subtitle: Text(attendance.timestamp ?? '-'),
+                        subtitle: Text(attendance.timestamp?.toString() ?? '-'),
                       );
                     },
                     itemCount: attendances.length,
                   ),
+            Visibility(
+              visible: isLive,
+              replacement: Center(
+                child: TextButton.icon(
+                  onPressed: startLive,
+                  label: Text('Start Live'),
+                  icon: Icon(Icons.play_arrow_rounded),
+                ),
+              ),
+              child: Column(
+                children: [
+                  TextButton.icon(
+                    onPressed: endLive,
+                    label: Text('End Live'),
+                    icon: Icon(Icons.stop_circle_rounded),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemBuilder: (_, index) {
+                        final attendance = attendances[index];
+                        return ListTile(
+                          title: Text(attendance.id ?? '-'),
+                          subtitle:
+                              Text(attendance.timestamp?.toString() ?? '-'),
+                        );
+                      },
+                      itemCount: attendances.length,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
