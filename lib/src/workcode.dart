@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_zkteco/flutter_zkteco.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
@@ -15,7 +17,7 @@ class Workcode {
     int command = Util.CMD_DEVICE;
     String commandString = 'WorkCode';
 
-    var resp = await self.command(command, commandString);
+    var resp = await self.command(command, commandString: Uint8List.fromList(commandString.codeUnits));
 
     if (resp['status'] == false) {
       return null;

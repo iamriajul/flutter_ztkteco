@@ -1,4 +1,8 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_zkteco/flutter_zkteco.dart';
+import 'package:flutter_zkteco/src/error/zk_error_connection.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
 class Device {
@@ -14,7 +18,8 @@ class Device {
     int command = Util.CMD_DEVICE;
     String commandString = '~DeviceName';
 
-    dynamic reply = await self.command(command, commandString);
+    dynamic reply =
+        await self.command(command, commandString: utf8.encode(commandString));
 
     if (reply is bool) {
       return reply;
@@ -29,22 +34,18 @@ class Device {
   /// be connected and authenticated before this method can be used.
   ///
   /// The method returns a [Future] that completes with a [bool] indicating if
-  /// the device was successfully enabled, or a [String] containing an error
-  /// message if the device could not be enabled.
-  ///
-  /// If the device is already enabled, this method does nothing and returns
-  /// [true].
-  static Future<dynamic> enable(ZKTeco self) async {
-    int command = Util.CMD_ENABLE_DEVICE;
-    String commandString = '';
+  /// the device was successfully enabled, or a [ZKNetworkError] if the device
+  /// could not be enabled.
+  static Future<bool> enable(ZKTeco self) async {
+    final Map<String, dynamic> response =
+        await self.command(Util.CMD_ENABLE_DEVICE);
 
-    dynamic reply = await self.command(command, commandString);
-
-    if (reply is bool) {
-      return reply;
+    if (response['status'] == true) {
+      self.isEnabled = true;
+      return true;
     }
 
-    return String.fromCharCodes(reply);
+    throw ZKNetworkError("Can't enable device");
   }
 
   /// Disables the device.
@@ -58,17 +59,16 @@ class Device {
   ///
   /// If the device is already disabled, this method does nothing and returns
   /// [true].
-  static Future<dynamic> disable(ZKTeco self) async {
-    int command = Util.CMD_DISABLE_DEVICE;
-    String commandString = String.fromCharCodes([0x00, 0x00]);
+  static Future<bool> disable(ZKTeco self) async {
+    final Map<String, dynamic> response =
+        await self.command(Util.CMD_DISABLE_DEVICE);
 
-    dynamic reply = await self.command(command, commandString);
-
-    if (reply is bool) {
-      return reply;
+    if (response['status'] == true) {
+      self.isEnabled = false;
+      return true;
     }
 
-    return String.fromCharCodes(reply);
+    throw ZKNetworkError("Can't disable device");
   }
 
   /// Powers off the device.
@@ -81,9 +81,9 @@ class Device {
   /// message if the device could not be powered off.
   static Future<dynamic> powerOff(ZKTeco self) async {
     int command = Util.CMD_POWEROFF;
-    String commandString = String.fromCharCodes([0x00, 0x00]);
 
-    dynamic reply = await self.command(command, commandString);
+    dynamic reply = await self.command(command,
+        commandString: Uint8List.fromList([0x00, 0x00]));
 
     if (reply is bool) {
       return reply;
@@ -102,9 +102,9 @@ class Device {
   /// message if the device could not be restarted.
   static Future<dynamic> restart(ZKTeco self) async {
     int command = Util.CMD_RESTART;
-    String commandString = String.fromCharCodes([0x00, 0x00]);
 
-    dynamic reply = await self.command(command, commandString);
+    dynamic reply = await self.command(command,
+        commandString: Uint8List.fromList([0x00, 0x00]));
 
     if (reply is bool) {
       return reply;
@@ -123,9 +123,9 @@ class Device {
   /// an error message if the device could not be put into sleep mode.
   static Future<dynamic> sleep(ZKTeco self) async {
     int command = Util.CMD_SLEEP;
-    String commandString = String.fromCharCodes([0x00, 0x00]);
 
-    dynamic reply = await self.command(command, commandString);
+    dynamic reply = await self.command(command,
+        commandString: Uint8List.fromList([0x00, 0x00]));
 
     if (reply is bool) {
       return reply;
@@ -145,9 +145,9 @@ class Device {
   /// containing an error message if the device could not be queried.
   static Future<dynamic> resume(ZKTeco self) async {
     int command = Util.CMD_RESUME;
-    String commandString = String.fromCharCodes([0x00, 0x00]);
 
-    dynamic reply = await self.command(command, commandString);
+    dynamic reply = await self.command(command,
+        commandString: Uint8List.fromList([0x00, 0x00]));
 
     if (reply is bool) {
       return reply;
@@ -166,9 +166,9 @@ class Device {
   /// message if the device could not be queried.
   static Future<dynamic> testVoice(ZKTeco self) async {
     int command = Util.CMD_TESTVOICE;
-    String commandString = String.fromCharCodes([0x00, 0x00]);
 
-    dynamic reply = await self.command(command, commandString);
+    dynamic reply = await self.command(command,
+        commandString: Uint8List.fromList([0x00, 0x00]));
 
     if (reply is bool) {
       return reply;
@@ -188,9 +188,8 @@ class Device {
   /// error message if the device could not be queried.
   static Future<dynamic> clearLCD(ZKTeco self) async {
     int command = Util.CMD_CLEAR_LCD;
-    String commandString = '';
 
-    dynamic reply = await self.command(command, commandString);
+    dynamic reply = await self.command(command);
 
     if (reply is bool) {
       return reply;
@@ -222,9 +221,9 @@ class Device {
     final byte2 = rank >> 8;
     const byte3 = 0x00;
 
-    String commandString = String.fromCharCodes([byte1, byte2, byte3]) + text;
-
-    dynamic reply = await self.command(command, commandString);
+    dynamic reply = await self.command(command,
+        commandString:
+            Uint8List.fromList([byte1, byte2, byte3] + utf8.encode(text)));
 
     if (reply is bool) {
       return reply;

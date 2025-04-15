@@ -18,8 +18,7 @@ class Time {
         ..buffer.asByteData().setUint32(0, encodedTime, Endian.little);
 
       // Send command and wait for reply
-      var resp =
-          await self.command(command, String.fromCharCodes(commandBytes));
+      var resp = await self.command(command, commandString: commandBytes);
 
       if (resp['status'] == false) {
         return null;
@@ -35,20 +34,19 @@ class Time {
     }
   }
 
-  /// Returns the current time of the device as a [String] in the format
-  /// "HH:MM:SS DD/MM/YYYY".
+  /// Retrieves the current time from the device.
   ///
   /// This method sends a command to the device to retrieve its current time.
   /// The device must be connected and authenticated before this method can be
   /// used.
   ///
-  /// The method returns a [Future] that completes with a [String] containing
-  /// the current time of the device, or a [bool] indicating if the device
-  /// could not be queried.
-  static Future<String?> get(ZKTeco self) async {
+  /// The method returns a [Future] that completes with a [DateTime] containing
+  /// the current time of the device, or `null` if the device could not be
+  /// queried.
+  static Future<DateTime?> get(ZKTeco self) async {
     int command = Util.CMD_GET_TIME;
     try {
-      await self.command(command, '');
+      await self.command(command);
 
       // Convert binary response to time
       Uint8List reverseHexBytes = Util.hex2bin(

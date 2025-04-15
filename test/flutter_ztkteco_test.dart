@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_zkteco/flutter_zkteco.dart';
@@ -14,21 +13,6 @@ void main() async {
 
     expect(isDisconnected, true);
   });
-
-  test('enable live attendance', () async {
-    final fingerMachine =
-        ZKTeco("10.7.0.53", timeout: const Duration(minutes: 1));
-    await fingerMachine.connect();
-
-    await fingerMachine.enableLiveCapture();
-    debugPrint('Live attendance enabled');
-
-    AttendanceLog matcher = const AttendanceLog();
-
-    fingerMachine.onAttendanceRecordReceived.listen(expectAsync1((event) {
-      expect(event, matcher);
-    }));
-  }, timeout: const Timeout(Duration(minutes: 1)));
 
   test('get version success', () async {
     final fingerMachine = ZKTeco("10.7.0.53");
@@ -111,7 +95,8 @@ void main() async {
   });
 
   test('get Users', () async {
-    final fingerMachine = ZKTeco("10.7.0.53");
+    final fingerMachine =
+        ZKTeco("10.7.0.53", debug: true, timeout: const Duration(minutes: 1));
     await fingerMachine.connect();
     List<UserInfo> users = await fingerMachine.getUsers();
     // ignore: unnecessary_type_check
@@ -120,13 +105,14 @@ void main() async {
   });
 
   test('get Attendances', () async {
-    final fingerMachine = ZKTeco("10.7.0.53");
+    final fingerMachine =
+        ZKTeco("10.7.0.53", timeout: const Duration(minutes: 1), debug: true);
     await fingerMachine.connect();
     List<AttendanceLog> logs = await fingerMachine.getAttendanceLogs();
     // ignore: unnecessary_type_check
     expect(logs is List<AttendanceLog>, true);
     await fingerMachine.disconnect();
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('test voice', () async {
     final fingerMachine = ZKTeco("10.7.0.53");

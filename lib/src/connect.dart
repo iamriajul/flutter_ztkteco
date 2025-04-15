@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_zkteco/flutter_zkteco.dart';
 import 'package:flutter_zkteco/src/error/zk_error_connection.dart';
+import 'package:flutter_zkteco/src/finger_bridge.dart';
 import 'package:flutter_zkteco/src/util.dart';
 
 class Connect {
@@ -27,27 +29,31 @@ class Connect {
       self.userPacketSize = 72;
     }
 
-    await Util.createSocket(self);
-    int command = Util.CMD_CONNECT;
-    String commandString = '';
+    await resetStreamController(self);
+
+    await FingerBridge.createSocket(self);
 
     try {
-      var response = await self.command(command, commandString);
-      self.sessionId = (self.dataRecv[5] << 8) | self.dataRecv[4];
+      self.sessionId = 0;
+      self.replyId = Util.USHRT_MAX - 1;
+
+      Map<String, dynamic> response = await self.command(Util.CMD_CONNECT);
+
+      self.sessionId = self.header[2];
 
       if (response['code'] == Util.CMD_ACK_UNAUTH) {
         if (self.debug) {
           debugPrint('Try Auth');
         }
 
-        if (self.password == null) {
-          throw ZKErrorConnection('Password is null');
+        if (self.password?.isEmpty == true) {
+          throw ZKErrorConnection('Password is empty');
         }
 
         var commandString = Util.makeCommKey(self.password!, self.sessionId);
 
-        response = await self.command(
-            Util.CMD_AUTH, String.fromCharCodes(commandString));
+        response =
+            await self.command(Util.CMD_AUTH, commandString: commandString);
       }
 
       if (response['status']) {
@@ -85,23 +91,26 @@ class Connect {
   /// if the device does not respond or the acknowledgement is invalid.
   static Future<bool> disconnect(ZKTeco self) async {
     try {
-      int command = Util.CMD_EXIT;
-      String commandString = '';
+      final Map<String, dynamic> response = await self.command(Util.CMD_EXIT);
 
-      var response = await self.command(command, commandString);
-
-      if (response['status']) {
+      if (response['status'] == true) {
         self.isConnect = false;
 
+        // Close UDP or TCP
         if (!self.tcp && self.zkClient != null) {
           self.zkClient?.close();
+          self.zkClient = null;
         }
 
         if (self.tcp && self.zkSocket != null) {
-          self.zkSocket?.close();
+          await self.zkSocket?.close();
+          self.zkSocket = null;
         }
 
-        self.streamController.close();
+        // Check and close streamController safely
+        if (!self.streamController.isClosed) {
+          await self.streamController.close();
+        }
 
         return true;
       } else {
@@ -112,6 +121,13 @@ class Connect {
     }
   }
 
+  static Future<void> resetStreamController(ZKTeco self) async {
+    if (!self.streamController.isClosed) {
+      await self.streamController.close();
+    }
+    self.streamController = StreamController.broadcast();
+  }
+
   /// Starts the verification process on the device.
   ///
   /// The device must be connected and authenticated before this method can be
@@ -120,14 +136,44 @@ class Connect {
   /// The method returns a [Future] that completes with a [bool] indicating if
   /// the verification process was successfully started, or a [String] containing
   /// an error message if the device could not be queried.
-  static Future<dynamic> verifyAuth(ZKTeco self) async {
-    int command = Util.CMD_STARTVERIFY;
-    String commandString = '';
+  static Future<bool> verifyAuth(ZKTeco self) async {
+    final Map<String, dynamic> response =
+        await self.command(Util.CMD_STARTVERIFY);
+    if (response['status'] == true) {
+      return true;
+    }
 
-    var session = await self.command(command, commandString,
-        type: Util.COMMAND_TYPE_DATA);
-    if (session == false) {
-      return [];
+    throw ZKNetworkError("Can't verify auth");
+  }
+
+  /// Sends an acknowledgment to the device that the last command was received successfully.
+  ///
+  /// This function creates a header with the [CMD_ACK_OK] command and sends it to the device
+  /// using either TCP or UDP, depending on the connection type. If the connection is over TCP,
+  /// the header is wrapped in a TCP packet before being sent. If the connection is over UDP,
+  /// the header is sent directly to the device's IP and port.
+  ///
+  /// The method requires an active connection to the device and uses the session ID of the
+  /// [ZKTeco] instance to construct the header.
+  ///
+  /// Throws a [ZKNetworkError] if an error occurs during the acknowledgment process.
+  static Future<void> ackOk(ZKTeco self) async {
+    try {
+      final List<int> buf = Util.createHeader(
+        Util.CMD_ACK_OK,
+        self.sessionId,
+        Util.USHRT_MAX - 1,
+        [],
+      );
+
+      if (self.tcp) {
+        final Uint8List top = Util.createTcpTop(buf);
+        self.zkSocket?.add(top);
+      } else {
+        self.zkClient?.send(buf, InternetAddress(self.ip), self.port);
+      }
+    } catch (e) {
+      throw ZKNetworkError(e.toString());
     }
   }
 }

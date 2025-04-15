@@ -8,11 +8,13 @@ class UserInfo {
   final String? name;
   final UserType? role;
   final String? password;
+  final String? groupId;
   final int? cardNo;
 
   const UserInfo({
     this.uid,
     this.userId,
+    this.groupId,
     this.name,
     this.role,
     this.password,
@@ -24,6 +26,7 @@ class UserInfo {
         userId: json['userid'],
         name: json['name'],
         role: json['role'] == Util.LEVEL_USER ? UserType.user : UserType.admin,
+        groupId: json['group_id'],
         password: json['password'],
         cardNo: json['cardno'],
       );
@@ -33,12 +36,13 @@ class UserInfo {
         'userid': userId,
         'name': name,
         'role': role == UserType.user ? Util.LEVEL_USER : Util.LEVEL_ADMIN,
+        'group_id': groupId,
         'password': password,
         'cardno': cardNo,
       };
 
   @override
   String toString() {
-    return 'UserInfo(uid: $uid, userId: $userId, name: $name, role: $role, password: $password, cardNo: $cardNo)';
+    return 'UserInfo(uid: $uid, userId: $userId, name: $name, role: $role, password: $password, cardNo: $cardNo, groupId: $groupId)';
   }
 }

@@ -13,9 +13,8 @@ class Version {
   /// be queried.
   static Future<String?> get(ZKTeco self) async {
     int command = Util.CMD_VERSION;
-    String commandString = '';
 
-    var resp = await self.command(command, commandString);
+    var resp = await self.command(command);
 
     if (resp['status'] == false) {
       return null;
