@@ -390,8 +390,7 @@ class Util {
   /// to use for the XOR operation. The default is 50.
   ///
   /// The method returns a [Uint8List] containing the communication key.
-  static Uint8List makeCommKey(String keyStr, int sessionId, {int ticks = 50}) {
-    int key = int.parse(keyStr);
+  static Uint8List makeCommKey(int key, int sessionId, {int ticks = 50}) {
     int k = 0;
 
     // Bitwise reversal logic

@@ -138,3 +138,7 @@ print('Disconnected from the fingerprint machine.');
 
 - **Connection Issues**: Ensure that the IP address and port are correct, and that the machine is powered on and connected to the network.
 - **Compatibility**: The plugin is designed for ZKTeco and similar fingerprint machines. Ensure your device is supported.
+
+## Unsupported Devices
+
+- [MB360Plus](https://github.com/rymesaint/flutter_ztkteco/issues/12)

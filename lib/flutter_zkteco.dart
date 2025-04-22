@@ -74,7 +74,7 @@ class ZKTeco {
 
   bool isConnect = false;
 
-  String? password;
+  int? password;
 
   late int nextUid;
   late String nextUserId;

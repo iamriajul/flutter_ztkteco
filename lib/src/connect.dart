@@ -46,7 +46,7 @@ class Connect {
           debugPrint('Try Auth');
         }
 
-        if (self.password?.isEmpty == true) {
+        if (self.password == null) {
           throw ZKErrorConnection('Password is empty');
         }
 
