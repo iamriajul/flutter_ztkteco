@@ -146,6 +146,10 @@ print('Disconnected from the fingerprint machine.');
 - `String password`
 - `int cardNo`
 
+## Device Configuration
+
+- **ZKTeco K60**: Requires Password to be set to: `0`
+
 ## Troubleshooting
 
 - **Connection Issues**: Ensure that the IP address and port are correct, and that the machine is powered on and connected to the network.
