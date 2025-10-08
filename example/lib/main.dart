@@ -75,7 +75,7 @@ class _MyHomePageState extends State<MyHomePage> {
         debug: true,
         tcp: useTcp,
         timeout: Duration(seconds: 20),
-        // password: 0, / ZKTeco K60 uses password: 0
+        // password: 0, // ZKTeco K60 uses password: 0
       );
       final connect = await fingerprintMachine?.connect();
       if (connect == true) {
