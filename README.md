@@ -43,6 +43,18 @@ flutter pub get
 - iOS
 - Web (TBD)
 - Windows
+- MacOS
+
+#### MacOS
+Add 
+```
+	<key>com.apple.security.network.client</key>
+    <true/>
+```
+in your
+macos/Runner/DebugProfile.entitlements
+macos/Runner/Release.entitlements
+files
 
 ### Usage
 
